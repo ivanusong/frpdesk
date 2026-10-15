@@ -24,4 +24,4 @@ go test ./...       # run tests
 
 ## License
 
-frpdesk's own code is licensed under [Apache License 2.0](LICENSE). Third-party code retains its original licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/](licenses/).
+[Apache-2.0](LICENSE). Third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
