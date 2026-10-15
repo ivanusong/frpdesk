@@ -1,0 +1,15 @@
+version: '3'
+
+# 只为 `wails3 dev` 提供 common:dev:frontend（模板约定的任务名）。
+# 零构建链：无 vite，同步静态文件后用 python http.server 充当 dev server。
+
+vars:
+  VITE_PORT: '{{.WAILS_VITE_PORT | default "9245"}}'
+
+tasks:
+  dev:frontend:
+    cmds:
+      - rm -rf frontend/dist/bindings
+      - cp -R frontend/bindings frontend/dist/bindings
+      - cp -f assets/icon.svg frontend/dist/icon.svg
+      - cd frontend/dist && python3 -m http.server "{{.VITE_PORT}}"

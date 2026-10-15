@@ -1,0 +1,86 @@
+# GitHub Actions 构建（仅产出附件，不发布 Release、不上传 MinIO、不改更新源）。
+# 单台 macos-14（ARM64）Runner 复用 build.sh：darwin arm64/amd64 + windows amd64；
+# 前端零 npm，行为验证只用 Runner 自带 Node 跑零依赖脚本。
+name: 构建
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - GitHub
+  pull_request:
+  workflow_dispatch:
+
+# 只读仓库内容；构建附件由 upload-artifact 提供，无需写权限
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 三目标构建（darwin arm64/amd64 + windows amd64）
+    runs-on: macos-14
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go（版本取自 go.mod）
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # 模块缓存覆盖根模块与两个本地 fork 的 go.sum
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            third_party/frp/go.sum
+            third_party/wails/go.sum
+
+      - name: 安装 wails3 CLI（固定 v3.0.0-beta.28，与 go.mod 一致）
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.28
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/wails3" version
+
+      - name: 确认 Runner 自带 Node（不安装任何 npm 依赖）
+        run: node --version
+
+      - name: 单元测试
+        run: go test ./...
+
+      - name: 前端多服务端行为验证（零依赖 Node 脚本）
+        run: node scripts/verify-multiserver-ui.mjs
+
+      - name: 三目标构建（复用 build.sh）
+        run: bash build.sh
+
+      - name: 打包附件（按 VERSION 命名，ditto 保留 .app 可执行权限）
+        id: package
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          [ -n "$VERSION" ] || { echo "VERSION 文件缺失或为空"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-arm64.app" "bin/frpdesk-${VERSION}-darwin-arm64.zip"
+          ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-amd64.app" "bin/frpdesk-${VERSION}-darwin-amd64.zip"
+          cp "bin/frpdesk-windows-amd64.exe" "bin/frpdesk-${VERSION}-windows-amd64.exe"
+          ls -lh bin/frpdesk-*
+
+      - name: 打包法律文档附件（单独随 Windows EXE 分发）
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          bash scripts/stage-license-docs.sh "bin/frpdesk-${VERSION}-licenses"
+          ditto -c -k --norsrc "bin/frpdesk-${VERSION}-licenses" "bin/frpdesk-${VERSION}-licenses.zip"
+          rm -rf "bin/frpdesk-${VERSION}-licenses"
+
+      - name: 上传构建附件
+        uses: actions/upload-artifact@v4
+        with:
+          name: frpdesk-${{ steps.package.outputs.version }}-build
+          path: |
+            bin/frpdesk-${{ steps.package.outputs.version }}-darwin-arm64.zip
+            bin/frpdesk-${{ steps.package.outputs.version }}-darwin-amd64.zip
+            bin/frpdesk-${{ steps.package.outputs.version }}-windows-amd64.exe
+            bin/frpdesk-${{ steps.package.outputs.version }}-licenses.zip
+          if-no-files-found: error
+          retention-days: 14

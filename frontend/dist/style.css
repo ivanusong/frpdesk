@@ -1,0 +1,2292 @@
+/* ===== 设计 token（唯一来源）：亮/暗两套 ===== */
+:root {
+  /* 浅色 */
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eef0f3;
+  --surface-3: #e4e7ec;
+  --border: #e0e3e9;
+  --text: #1c2128;
+  --text-2: #5c6572;
+  --text-3: #98a0ad;
+  --primary: #3e9468;
+  --primary-hover: #337f58;
+  --primary-soft: rgba(62, 148, 104, 0.12);
+  /* 品牌转低饱和绿后与原 success 绿色相重叠（hsl 145≈147），--ok 移至 teal 色相保持语义可分 */
+  --ok: #0d9488;
+  --warn: #d97706;
+  --stat-3xx: #64748b; /* 状态码文字 3xx 蓝灰（浅色） */
+  /* 设备类别图表语义色（浅色）：桌面蓝 / 移动绿 / 平板琥珀 / 爬虫紫 / 其他灰 */
+  --chart-desktop: #4e7fbe;
+  --chart-mobile: #35996e;
+  --chart-tablet: #d08a1d;
+  --chart-bot: #9068c8;
+  --chart-other: #98a0ad;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-soft: rgba(220, 38, 38, 0.08);
+  /* 实心彩底按钮的文字墨色：浅色主题彩底较深，用白字 */
+  --primary-ink: #ffffff;
+  --danger-ink: #ffffff;
+  --overlay: rgba(18, 21, 27, 0.45);
+  --log-bg: #131822;
+  --log-text: #c6d2e2;
+  --log-time: #5c6879;
+  --log-error: #f87171;
+  --shadow: 0 8px 28px rgba(15, 20, 30, 0.16);
+
+  /* 卡片高度标准：隧道卡内容基准高（padding 14×2 + 两行），服务器卡 = 2 倍基准 */
+  --service-card-min-h: 72px;
+  --server-card-min-h: calc(var(--service-card-min-h) * 2);
+
+  /* 动效 token（定稿）*/
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-press: 120ms;
+  --dur-tab: 180ms;
+  --dur-modal: 240ms;
+  --dur-toast: 200ms;
+}
+
+/* 深色：中性深灰蓝底（非纯黑）*/
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-2: #1e222b;
+  --surface-3: #262b36;
+  --border: #2b313d;
+  --text: #e7eaf0;
+  --text-2: #a2abba;
+  --text-3: #6d7684;
+  --primary: #6cbf92;
+  --primary-hover: #82cba4;
+  --primary-soft: rgba(108, 191, 146, 0.16);
+  --ok: #2dd4bf;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --stat-3xx: #8fa3bd; /* 状态码文字 3xx 蓝灰（深色） */
+  /* 设备类别图表语义色（深色） */
+  --chart-desktop: #86abe0;
+  --chart-mobile: #62c99b;
+  --chart-tablet: #e8ad42;
+  --chart-bot: #b29ae2;
+  --chart-other: #6d7684;
+  /* 实心彩底按钮的文字墨色：深色主题品牌绿提亮，白字对比不足改深墨字；危险红仍用白字 */
+  --primary-ink: #0f2b1e;
+  --danger-ink: #ffffff;
+  --overlay: rgba(0, 0, 0, 0.55);
+  --log-bg: #0c0f14;
+  --log-text: #c6d2e2;
+  --log-time: #55606f;
+  --log-error: #f87171;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+
+/* 跟随系统：未显式指定主题时由系统偏好决定 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --surface-2: #1e222b;
+    --surface-3: #262b36;
+    --border: #2b313d;
+    --text: #e7eaf0;
+    --text-2: #a2abba;
+    --text-3: #6d7684;
+    --primary: #6cbf92;
+    --primary-hover: #82cba4;
+    --primary-soft: rgba(108, 191, 146, 0.16);
+    --ok: #2dd4bf;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+    --danger-hover: #dc2626;
+    --danger-soft: rgba(239, 68, 68, 0.12);
+    --stat-3xx: #8fa3bd;
+    --chart-desktop: #86abe0;
+    --chart-mobile: #62c99b;
+    --chart-tablet: #e8ad42;
+    --chart-bot: #b29ae2;
+    --chart-other: #6d7684;
+    --primary-ink: #0f2b1e;
+    --danger-ink: #ffffff;
+    --overlay: rgba(0, 0, 0, 0.55);
+    --log-bg: #0c0f14;
+    --log-text: #c6d2e2;
+    --log-time: #55606f;
+    --log-error: #f87171;
+    --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* [hidden] 语义必须压过任何 class 的 display 规则：
+   修复杂透明模态层因 .modal{display:flex} 击穿 hidden 属性、常驻拦截全页点击的严重 bug */
+[hidden] {
+  display: none !important;
+}
+
+.app {
+  position: relative; /* 锚定悬浮磨砂状态栏 */
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ===== 图标（lucide 内联）：16px / stroke 1.75 / currentColor ===== */
+.icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+/* ===== 按钮（默认=secondary 描边；primary/destructive 仅底部状态栏使用）===== */
+.btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 13px;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color 140ms var(--ease-out),
+    border-color 140ms var(--ease-out),
+    color 140ms var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: var(--text-3);
+  }
+}
+
+.btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+  }
+}
+
+.btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--danger-ink);
+  font-weight: 600;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-danger:hover:not(:disabled) {
+    background: var(--danger-hover);
+    border-color: var(--danger-hover);
+  }
+}
+
+/* 红色 ghost：红字 / 浅红底 hover（列表删除、确认框）*/
+.btn-ghost-danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-ghost-danger:hover:not(:disabled) {
+    background: var(--danger-soft);
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-sm .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.btn-icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ghost 变体：无边框透明底（titlebar 内图标按钮），hover 浅底 */
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: transparent;
+  }
+}
+
+/* ===== 顶栏（拖拽区）：左版本/更新入口 + 右 检查更新/主题/配置；无分割线 ===== */
+.titlebar {
+  --wails-draggable: drag;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px 8px 96px; /* 左侧红绿灯留白（加大与标题的间距） */
+  background: var(--bg);
+  flex-shrink: 0;
+  /* 拖拽区内文本一律不可选中、悬停不出现 I-beam 编辑光标（user-select 不改变 cursor，需双管齐下；
+     -webkit- 前缀兜底旧 WKWebView；内部按钮自身 cursor:pointer 不受影响） */
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* 非 macOS（系统标题栏）：无红绿灯，撤掉留白改与右侧对称 */
+html[data-no-mac] .titlebar {
+  padding-left: 16px;
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto; /* 吃掉剩余空间：右侧按钮组始终靠右，680px 最小宽不溢出 */
+  min-width: 0;
+}
+
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 应用标题（版本号，UpdateInfo 拉取后回填，不硬编码）：大号粗体最亮色；
+   不可选中/光标已在 .titlebar 统一处理 */
+.app-version {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* 更新 chip：版本号右侧小实心无边框全圆角按钮（有新版/更新进行中时出现） */
+.update-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: var(--primary);
+  color: var(--primary-ink);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color 140ms var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+.update-chip .icon {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2;
+}
+
+.update-chip:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.update-chip:disabled {
+  opacity: 0.8; /* 忙时仍清晰展示进度文案，仅禁点 */
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .update-chip:hover:not(:disabled) {
+    background: var(--primary-hover);
+  }
+}
+
+/* 忙态：chip 与检查更新按钮的图标旋转示意进行中 */
+.update-chip.is-busy .icon,
+.btn-icon.is-busy .icon {
+  animation: icon-spin 0.9s linear infinite;
+}
+
+@keyframes icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.no-drag,
+.no-drag * {
+  --wails-draggable: no-drag;
+}
+
+/* Tab：纯文字 + active 变色 + 底部短指示条 */
+.tabbar {
+  position: relative;
+  display: flex;
+  gap: 6px;
+}
+
+.tab {
+  appearance: none;
+  position: relative;
+  z-index: 1; /* 文字渲染在滑块之上：定位元素按 DOM 序绘制，滑块在后会盖住按钮 */
+  border: none;
+  background: transparent;
+  padding: 6px 12px 9px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: color var(--dur-tab) var(--ease-out);
+}
+
+
+.tab.is-active {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* 单一滑块：切换时在 tab group 间横向滑移（left+width 过渡） */
+.tab-slider {
+  position: absolute;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--primary);
+  transition:
+    left var(--dur-tab) var(--ease-in-out),
+    width var(--dur-tab) var(--ease-in-out);
+}
+
+/* 首帧定位：跳过过渡（JS 定位后强制回流再移除） */
+
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover {
+    color: var(--text);
+  }
+}
+
+/* ===== 面板（显隐切换，内容不做动画）===== */
+.panels {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel {
+  background: var(--bg);
+  flex: 1;
+  padding: 10px 20px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 工具行：左侧 Tab 导航 + 右侧当前面板的上下文操作 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 20px 6px;
+  flex-shrink: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 同组关联按钮（新增 HTTP / TCP 两个入口）：间距比组间更紧，视觉成对 */
+.btn-pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.check-inline input {
+  accent-color: var(--primary);
+}
+
+/* ===== 表单 ===== */
+.form,
+.form [data-fields] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* select 与 input 视觉对齐：appearance:none + 右侧自绘 chevron（currentColor 随主题）*/
+.select-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.select-wrap select {
+  appearance: none;
+  width: 100%;
+  padding: 7px 28px 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  transition: border-color 140ms var(--ease-out);
+}
+
+.select-wrap select:focus {
+  outline: 2px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  border-color: var(--primary);
+}
+
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  transform: translateY(-70%) rotate(45deg);
+  border-right: 1.75px solid var(--text-2);
+  border-bottom: 1.75px solid var(--text-2);
+  pointer-events: none;
+}
+
+.form-narrow {
+  max-width: 420px;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form label > span {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.form input[type="text"],
+.form input[type="number"],
+.form input[type="password"] {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  width: 100%;
+  transition: border-color 140ms var(--ease-out);
+}
+
+.form input:focus {
+  outline: 2px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  border-color: var(--primary);
+}
+
+.form-row {
+  display: flex;
+  gap: 10px;
+}
+
+.form-row > label {
+  flex: 1;
+  min-width: 0; /* 窄窗下防输入控件默认最小宽把行撑出弹窗 */
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+#service-form .form-actions {
+  align-items: center;
+}
+
+/* 服务器归属行：select 靠左与保存/取消同行；迁移提示条置于其上 */
+#service-form .form-actions--server {
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.server-pick {
+  flex: 1;
+  min-width: 0;
+  max-width: 260px;
+}
+
+.server-pick .select-inline {
+  width: 100%;
+}
+
+.server-pick .select-wrap select {
+  padding: 6px 28px 6px 10px;
+  font-size: 12.5px;
+}
+
+.move-hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 10px;
+  word-break: break-all;
+}
+
+/* 通用首帧定位：无过渡（tab-slider 自身等 JS 定位元素共用） */
+.no-anim,
+.no-anim * {
+  transition: none !important;
+}
+
+/* ===== 服务列表（留白放宽；行无入场动画）===== */
+.service-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-x: auto;
+  /* 底部穿越区：滚动区已延伸到窗口底（状态栏悬浮其上），补足状态栏高度，
+     让最后一张卡能完整滚出磨砂栏 */
+  padding-bottom: 74px;
+}
+
+.service-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 14px 16px;
+  min-height: var(--service-card-min-h);
+  min-width: 560px; /* 配合最小窗口 680：永不拆行；极端窄时容器横向滚动 */
+}
+
+.service-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* ===== 配置 Tab：Frps 服务器卡片（两列等宽，gap 计入刚好撑满；窄窗一列） ===== */
+.server-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-bottom: 74px; /* 底部穿越区：同服务列表 */
+  align-items: stretch;
+}
+
+@media (max-width: 640px) {
+  .server-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 纵向排布：标题/连接地址/底行操作；底行 margin-top:auto 落底（2 倍隧道基准高内自然分布） */
+.server-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 14px 16px;
+  min-height: var(--server-card-min-h); /* 2 倍隧道标准卡高（token 定义） */
+  min-width: 0; /* 允许长地址换行而非横向滚动 */
+}
+
+.server-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.server-head .service-name-text {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-addr {
+  font-size: 12px;
+  color: var(--text-2);
+  min-width: 0;
+}
+
+/* 长地址换行展示，不横滚 */
+.server-addr .mono {
+  word-break: break-all;
+  white-space: normal;
+}
+
+/* 关联隧道信息行：轻量灰字（禁用计入关联，已启用单独计数） */
+.server-foot {
+  font-size: 12px;
+  color: var(--text-2);
+  min-width: 0;
+}
+
+.server-foot span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 底行操作：测试/编辑/删除常驻左下，保持底行落底 */
+.server-ops {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 配置卡删除按钮：去边线、默认弱化，hover 显示危险色（仅作用于此卡，隧道卡不变） */
+.server-ops .btn-ghost-danger {
+  border-color: transparent;
+  color: var(--text-2);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .server-ops .btn-ghost-danger:hover:not(:disabled) {
+    background: var(--danger-soft);
+    border-color: transparent;
+    color: var(--danger);
+  }
+}
+
+
+
+.server-ops .switch {
+  margin-left: auto;
+}
+
+/* 服务卡片上的所属配置名 tag */
+.tag-srv {
+  color: var(--text-2);
+  border: 1px solid color-mix(in srgb, var(--text-2) 45%, transparent);
+}
+
+.tag-srv--none {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: transparent;
+}
+
+.service-name {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.service-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.tag-tcp {
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+.tag-udp {
+  color: var(--chart-desktop);
+  border: 1px solid color-mix(in srgb, var(--chart-desktop) 45%, transparent);
+}
+
+.tag-http {
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+}
+
+.tag-disabled {
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+/* 逐服务代理状态徽章（enabled 服务：注册中/已注册/注册失败）*/
+.tag-ok {
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+}
+
+.tag-proxy {
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+.tag-svc-failed {
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  cursor: help; /* title 悬停看失败原因 */
+}
+
+.service-meta {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+}
+
+.service-meta > span {
+  white-space: nowrap;
+}
+
+.service-meta a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+/* 地址指向箭头：公网地址 → 本地映射目标（最弱层级，仅示意流向） */
+.meta-arrow {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .service-meta a:hover {
+    text-decoration: underline;
+  }
+}
+
+.service-ops {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* 卡片删除图标按钮：无边框 ghost 的红色变体（图标常亮红、hover 浅红底）；
+   需放在 .btn-ghost 规则之后靠源序覆盖其 surface-2 hover */
+.svc-op-danger {
+  color: var(--danger);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .svc-op-danger:hover:not(:disabled) {
+    background: var(--danger-soft);
+    border-color: transparent;
+    color: var(--danger);
+  }
+}
+
+/* 卡片操作组 hover 渐显：默认隐藏（占位不收布局），移入卡片时以删除按钮为锚、
+   从右往左展开——离锚越远起始偏移越大（r0 4px / r1 12px / r2 20px / r3 28px），
+   同一时间轴上远者行程长，无需时间错峰即呈波次感；离场各回各的偏移，原路镜像收回。
+   仅精确指针设备启用（触屏无 hover 时常显）；focus-within 兜底键盘可达。
+   用 translate 属性而非 transform，避免与 .btn:active 的 scale 按压互相覆盖。
+   时长放宽到 260ms + 双端柔和曲线：优先柔和舒适，不追求轻快。 */
+@media (hover: hover) and (pointer: fine) {
+  .service-item .svc-op {
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      opacity 260ms var(--ease-in-out),
+      translate 260ms var(--ease-in-out);
+  }
+
+  .service-item .svc-op--r0 {
+    translate: 4px 0;
+  }
+
+  .service-item .svc-op--r1 {
+    translate: 12px 0;
+  }
+
+  .service-item .svc-op--r2 {
+    translate: 20px 0;
+  }
+
+  .service-item .svc-op--r3 {
+    translate: 28px 0;
+  }
+
+  .service-item:hover .svc-op,
+  .service-item:focus-within .svc-op {
+    opacity: 1;
+    translate: 0;
+    pointer-events: auto;
+  }
+
+  /* 悬停在启用开关上时不展现操作组：开关切换会触发隧道重启与多次卡片重渲染，
+     重建后的卡片在指针下会重放渐显动画，造成按钮反复闪烁；此处保持隐藏。
+     不重置 translate：从开关移回卡片主体时原地淡入，不再重放展开。 */
+  .service-item:has(.switch:hover) .svc-op {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+/* ===== 服务图标：卡片最左纯 emoji 展示（无底色）；弹窗触发按钮版自带方底 ===== */
+.service-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+  user-select: none;
+}
+
+/* 弹窗标题行的图标按钮：保留方形容器外观（底色/圆角归按钮版）+ 可点反馈 */
+button.service-icon {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--surface-2);
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color 140ms var(--ease-out),
+    border-color 140ms var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+button.service-icon:active {
+  transform: scale(0.95);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  button.service-icon:hover {
+    background: var(--surface-3);
+    border-color: var(--border);
+  }
+}
+
+button.service-icon:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.icon-pick-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* 图标 popover：锚定标题行按钮下方右对齐；modal-panel 的 transform 形成层叠上下文，
+   z-index 仅需盖住同层表单，不干扰 .modal-overlay 遮罩。
+   宽 310px = 8×32 列 + 7×4 间距 + padding 20 + 边框 2；max-width 压缩时靠网格收列适配 */
+.icon-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  width: 310px;
+  max-width: calc(100vw - 88px);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top right;
+  transition:
+    opacity 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+}
+
+.icon-popover.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+/* 单按钮行（🎲 随机）：保留容器防按钮被列向 flex 拉伸满宽 */
+.icon-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-grid {
+  display: grid;
+  /* auto-fill 自适应列数：容器被 max-width 压窄时自动收列（最小列 32px），
+     min-content 宽不再固定 284px，从根上消除横向溢出 */
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 4px;
+  max-height: 228px; /* 约 6 行：底部露出半行暗示可滚动 */
+  overflow-y: auto;
+  overflow-x: hidden; /* 只纵滚（overflow-y:auto 会把 x 轴算成 auto，这里显式压掉兜底） */
+  padding: 2px;
+}
+
+.icon-cell {
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  justify-self: center; /* 列被 1fr 拉伸时 emoji 在列内保持居中 */
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 19px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .icon-cell:hover {
+    background: var(--surface-2);
+  }
+}
+
+.icon-cell:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.icon-cell.is-active {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+}
+
+/* ===== Switch：36×20 轨道 / 16px thumb / 弹性 translateX ===== */
+.switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  appearance: none;
+  background: var(--surface-3);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 360ms var(--ease-in-out);
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  /* 细微高光：顶部内阴影 + 1px 亮边 + 投影 */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 0 0 0.5px rgba(0, 0, 0, 0.05),
+    0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: translate 360ms var(--ease-in-out);
+}
+
+.switch:checked {
+  background: var(--primary);
+}
+
+.switch:checked::after {
+  translate: 16px 0;
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .switch:hover:not(:disabled):not(:checked) {
+    background: color-mix(in srgb, var(--surface-3) 70%, var(--text-3));
+  }
+
+  .switch:hover:not(:disabled):checked {
+    background: var(--primary-hover);
+  }
+}
+
+.empty {
+  color: var(--text-3);
+  text-align: center;
+  padding: 24px 0;
+  margin: 0;
+}
+
+/* ===== 日志 ===== */
+.panel-logs {
+  overflow: hidden;
+}
+
+.log-view {
+  flex: 1;
+  min-height: 0;
+  background: var(--log-bg);
+  color: var(--log-text);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  border-radius: 8px;
+  padding: 10px 12px 74px; /* 底部穿越区：最后一行日志可完整滚出磨砂状态栏 */
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-line.error {
+  color: var(--log-error);
+}
+
+.log-line.warn {
+  color: var(--warn);
+}
+
+.log-time {
+  color: var(--log-time);
+  margin-right: 8px;
+}
+
+/* 日志归属标注：[服务器名] 或 [系统]，与时间同级弱化 */
+.log-srv {
+  color: var(--log-time);
+  margin-right: 8px;
+}
+
+/* ===== 模态 ===== */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
+}
+
+.modal-panel {
+  position: relative;
+  width: min(400px, calc(100vw - 48px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+  transition:
+    opacity 180ms var(--ease-out),
+    transform 180ms var(--ease-out);
+}
+
+.modal.is-open .modal-overlay {
+  opacity: 1;
+}
+
+.modal.is-open .modal-panel {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-modal) var(--ease-out),
+    transform var(--dur-modal) var(--ease-out);
+}
+
+.modal-panel h2 {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+
+/* 标题行：h2 左 + 图标选择按钮右（服务模态专用；设置模态保持纯 h2） */
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.modal-head h2 {
+  margin: 0;
+}
+
+/* Frps 配置弹窗：字段较多（HTTP 展开时 7 项），限制在视口内并纵向滚动；
+   footer（取消/保存）随内容滚动保持右对齐齐平 */
+#server-modal .modal-panel {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+/* ===== Frps 配置弹窗：HTTP 能力开关分组 =====
+   专用 .server-http-toggle 类避免被 .form label 的列布局覆写：
+   head 为「标题左 / 开关右」单行，label 整行可点（原生 change，不手动 click） */
+.server-http-toggle {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#server-form .server-http-toggle-head {
+  display: flex;
+  flex-direction: row; /* 覆写 .form label 的 column，保证标题与开关同行 */
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.server-http-toggle-head .switch {
+  flex-shrink: 0;
+}
+
+.server-http-toggle-head:hover .switch:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-3) 70%, var(--text-3));
+}
+
+.server-http-toggle-head:hover .switch:checked {
+  background: var(--primary-hover);
+}
+
+#server-form .server-http-toggle-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.server-http-toggle-hint {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/* 展开的字段组：分组内轻分隔，窄窗自适应（form-row>label 已有 min-width:0） */
+.server-http-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* ===== 访问二维码弹窗：小面板居中，白底承托二维码保证暗色主题扫码对比度 ===== */
+.qr-panel {
+  width: auto;
+  min-width: 236px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.qr-box {
+  width: 200px;
+  height: 200px;
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.qr-box img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 生成中/失败占位：盒内恒为白底，用固定灰不随主题 token */
+.qr-loading {
+  font-size: 12px;
+  color: #98a0ad;
+}
+
+.qr-url {
+  margin: 0;
+  max-width: 260px;
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: center;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+/* ===== 应用内确认弹窗 ===== */
+.confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
+}
+
+.confirm-panel {
+  position: relative;
+  width: min(340px, calc(100vw - 48px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+  transition:
+    opacity 180ms var(--ease-out),
+    transform 180ms var(--ease-out);
+}
+
+.confirm.is-open .confirm-overlay {
+  opacity: 1;
+}
+
+.confirm.is-open .confirm-panel {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-modal) var(--ease-out),
+    transform var(--dur-modal) var(--ease-out);
+}
+
+.confirm-text {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* ===== 更新日志确认弹窗：confirm 体系变体（更新 chip 二次确认专用）=====
+   面板宽度与模态一致（340px 放日志太挤），圆角/阴影/进出场过渡全部继承
+   .confirm-panel；颜色全部走主题变量，深浅色自动适配。*/
+.confirm-panel--notes {
+  width: min(400px, calc(100vw - 48px));
+}
+
+.update-confirm-head {
+  margin: 0 0 12px;
+}
+
+.update-confirm-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.update-confirm-meta {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+/* 日志内容区：超高滚动不撑爆弹窗；overscroll 到边界不带动底层页面滚动 */
+.update-confirm-notes {
+  max-height: min(280px, 40vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.update-confirm-notes h4 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.update-confirm-notes p {
+  margin: 0 0 8px;
+}
+
+.update-confirm-notes ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.update-confirm-notes li {
+  margin: 2px 0;
+}
+
+.update-confirm-notes h4:first-child,
+.update-confirm-notes p:first-child,
+.update-confirm-notes ul:first-child {
+  margin-top: 0;
+}
+
+.update-confirm-notes p:last-child,
+.update-confirm-notes ul:last-child {
+  margin-bottom: 0;
+}
+
+/* ===== Toast：顶部居中、中性 surface 底、左侧图标着色 ===== */
+.toasts {
+  position: fixed;
+  top: 56px; /* 顶栏下方，不遮挡 */
+  left: 0;
+  right: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: none; /* 纯展示不打断点击：多条堆叠也不会挡住下方界面 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 380px;
+  padding: 9px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(-12px);
+  /* 退出：原路反向 160ms */
+  transition:
+    transform 160ms var(--ease-out),
+    opacity 160ms var(--ease-out);
+}
+
+.toast.is-in {
+  opacity: 1;
+  transform: none;
+  /* 进入：200ms */
+  transition:
+    transform var(--dur-toast) var(--ease-out),
+    opacity var(--dur-toast) var(--ease-out);
+}
+
+.toast .icon {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
+}
+
+.toast--success .icon {
+  color: var(--ok);
+}
+
+.toast--error .icon {
+  color: var(--danger);
+}
+
+.toast--info .icon {
+  color: var(--primary);
+}
+
+.toast-text {
+  line-height: 1.4;
+}
+
+/* ===== 底部状态栏（唯一 primary/destructive 按钮所在）===== */
+.statusbar {
+  position: absolute; /* 悬浮于内容之上：滚动区撑满窗口底部，卡片从磨砂栏下方穿过 */
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px; /* 上下与右侧一致：启停按钮四周间距均匀 */
+  /* 磨砂玻璃材质：半透明 surface + backdrop 模糊提饱和，明暗主题走 token 自适应 */
+  background: color-mix(in srgb, var(--surface) 1%, transparent);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+
+.dot--stopped {
+  background: var(--danger);
+}
+
+.dot--running {
+  background: var(--ok);
+}
+
+.dot--starting {
+  background: var(--warn);
+}
+
+.dot--failed {
+  background: var(--danger);
+}
+
+.status #status-label {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.status-count {
+  font-size: 12px;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  padding: 0 7px;
+  border-radius: 999px;
+  line-height: 16px;
+}
+
+.status-failed {
+  font-size: 12px;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.status-message,
+.status-started {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.statusbar .btn {
+  padding: 8px 16px; /* 标准按钮尺寸（与模态按钮同级）*/
+  font-size: 13px;
+}
+
+/* 退出程序按钮：浅红文字暗示退出语义（非实心危险色，避免与启停按钮抢视觉）；
+   hover 加深至危险色 + 浅红底，与卡片删除图标按钮同一交互语言 */
+#btn-quit {
+  color: color-mix(in srgb, var(--danger) 78%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  #btn-quit:hover:not(:disabled) {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+}
+
+/* ===== 统计面板 ===== */
+.panel-stats {
+  padding-bottom: 84px; /* 底部穿越区：同服务列表，最后区块可完整滚出磨砂状态栏 */
+}
+
+.stats-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 空态 / 加载失败态 */
+.stats-empty {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 44px 20px;
+  text-align: center;
+}
+
+.stats-empty-title {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.stats-empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* 已有数据时的刷新失败提示（低调一行） */
+.stats-error {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+/* 数字卡片行 */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.stat-card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat-sub {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 区块卡片（排行/分布/曲线/最近请求共用） */
+.stat-section {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 13px 16px 15px;
+}
+
+.stat-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.stat-sec-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stat-sec-note {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* 水平条形排行（服务/路径共用）：标签行 + 轨道条 */
+.rank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rank-row {
+  min-width: 0;
+}
+
+.rank-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.rank-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-svc {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.rank-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-err {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--danger);
+}
+
+/* 排行条目「当前服务器」标注（统计为服务累计，当前归属单独标出） */
+.rank-cur {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 30%;
+}
+
+.rank-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+/* 双排行并排（窄窗自动叠放） */
+.rank-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+}
+
+.rank-grid .stat-section {
+  min-width: 0;
+}
+
+.rank-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary);
+}
+
+/* 最近请求表格状态码文字着色（语义：2xx 绿 / 3xx 蓝灰 / 4xx 橙 / 5xx 红 / 其他灰） */
+.st-2xx {
+  color: var(--ok);
+}
+
+.st-3xx {
+  color: var(--stat-3xx);
+}
+
+.st-4xx {
+  color: var(--warn);
+}
+
+.st-5xx {
+  color: var(--danger);
+}
+
+.st-other {
+  color: var(--text-3);
+}
+
+/* 图例（设备饼图用）：色块 + 标签 + 次数 + 百分比，纯静态展示（hover 仅扇区） */
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+/* 饼图 hover：悬停扇区描边加粗强调，其余降透明（仅 opacity/stroke，无位移/外扩）；
+   donut 中心默认面/hover 面交叉淡（120ms，不滑动）。过渡仅在 hover:hover+fine 设备启用 */
+.pie-center {
+  pointer-events: none; /* 中心文字不挡扇区 hover */
+}
+
+.pie-center-face {
+  transition: opacity 120ms ease;
+}
+
+.pie-center-hover {
+  opacity: 0;
+}
+
+.pie-seg {
+  transition:
+    opacity 180ms ease,
+    stroke-width 180ms ease;
+}
+
+.device-pie-svg.has-hover .pie-seg {
+  opacity: 0.35;
+}
+
+.device-pie-svg.has-hover .pie-seg.is-hover {
+  opacity: 1;
+  stroke-width: 21;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .device-pie-svg.has-hover .pie-center-default {
+    opacity: 0;
+  }
+
+  .device-pie-svg.has-hover .pie-center-hover {
+    opacity: 1;
+  }
+}
+
+/* 减少动效：曲线 hover 保留 opacity 淡入淡出、去掉 transform 位移（缩放/上浮） */
+@media (prefers-reduced-motion: reduce) {
+  #stat-timeline-chart .hover-dot,
+  #stat-timeline-chart .timeline-tip {
+    transform: none;
+  }
+
+  #stat-timeline-chart .hover-dot {
+    transition: opacity 130ms linear;
+  }
+
+  #stat-timeline-chart .timeline-tip {
+    transition: opacity 150ms linear;
+  }
+}
+
+.legend-item b {
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-pct {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分时曲线 + 访问设备分布同行：左曲线撑满剩余宽，右饼图固定正方形不随窗口伸缩；
+   极窄时 wrap 叠落（左框 min-width 触发换行）；两子框均隐藏时收起整行避免空隙 */
+.timeline-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.timeline-row:not(:has(.stat-section:not([hidden]))) {
+  display: none;
+}
+
+#stat-timeline-sec {
+  flex: 1 1 0;
+  min-width: 280px;
+}
+
+/* 设备框：固定正方形（宽=高 260）；纵向排布标题 + 居中内容 */
+#stat-devices-sec {
+  flex: 0 0 260px;
+  width: 260px;
+  height: 260px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 访问设备分布：donut 居中，图例在下方横排 wrap（正方形框内自动紧凑换行） */
+.device-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  align-content: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+
+.device-pie-svg {
+  display: block;
+  width: 128px;
+  height: 128px;
+  flex-shrink: 0;
+}
+
+/* donut 中心总数 */
+.pie-total {
+  font-size: 19px;
+  font-weight: 700;
+  fill: var(--text);
+}
+
+.pie-total-label {
+  font-size: 8.5px;
+  letter-spacing: 1px;
+  fill: var(--text-3);
+}
+
+.device-legend {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  min-width: 0;
+}
+
+.pie-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* 设备类别图表语义色（饼图扇区 stroke / 图例点 background） */
+.pie-seg--desktop {
+  stroke: var(--chart-desktop);
+}
+
+.pie-seg--mobile {
+  stroke: var(--chart-mobile);
+}
+
+.pie-seg--tablet {
+  stroke: var(--chart-tablet);
+}
+
+.pie-seg--bot {
+  stroke: var(--chart-bot);
+}
+
+.pie-seg--other {
+  stroke: var(--chart-other);
+}
+
+.pie-dot--desktop {
+  background: var(--chart-desktop);
+}
+
+.pie-dot--mobile {
+  background: var(--chart-mobile);
+}
+
+.pie-dot--tablet {
+  background: var(--chart-tablet);
+}
+
+.pie-dot--bot {
+  background: var(--chart-bot);
+}
+
+.pie-dot--other {
+  background: var(--chart-other);
+}
+
+/* 分时请求曲线：SVG 面积（垂直渐变：线色 → 全透明）+ monotone 平滑折线；
+   preserveAspectRatio=none 拉伸铺满，折线/指示线用 vector-effect 固定描边宽度不随拉伸变形 */
+.grad-stop-top {
+  stop-color: var(--primary);
+  stop-opacity: 0.32;
+}
+
+.grad-stop-bottom {
+  stop-color: var(--primary);
+  stop-opacity: 0;
+}
+
+#stat-timeline-chart {
+  position: relative; /* tooltip 绝对定位锚 */
+}
+
+.timeline-svg {
+  display: block;
+  width: 100%;
+  height: 140px;
+}
+
+.timeline-area {
+  stroke: none;
+}
+
+.timeline-line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* 曲线 hover：吸附指示线（细、半透明虚线）+ 数据点圆圈 + tooltip，颜色全走主题变量。
+   出现/消失过渡仅在 hover:hover+fine 设备启用；跟随指针的坐标/定位更新无过渡（免拖影）。 */
+.hover-line {
+  stroke: var(--text-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hover-dot {
+  fill: var(--surface);
+  stroke: var(--primary);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  opacity: 0;
+  transform: scale(0.6);
+  transform-box: fill-box; /* SVG 缩放以自身圆心为基准 */
+  transform-origin: center;
+  pointer-events: none;
+}
+
+.timeline-tip {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text);
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hover-line {
+    transition: opacity 150ms var(--ease-out);
+  }
+
+  .hover-dot {
+    transition:
+      opacity 130ms var(--ease-out),
+      transform 130ms var(--ease-out);
+  }
+
+  .timeline-tip {
+    transition:
+      opacity 150ms var(--ease-out),
+      transform 150ms var(--ease-out);
+  }
+
+  #stat-timeline-chart.is-hovering .hover-line {
+    opacity: 0.6;
+  }
+
+  #stat-timeline-chart.is-hovering .hover-dot {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  #stat-timeline-chart.is-hovering .timeline-tip {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.timeline-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 最近请求：紧凑表格 + 滚动区（表头吸附） */
+.recent-wrap {
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.recent-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.recent-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  padding: 2px 8px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.recent-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.recent-table tr:last-child td {
+  border-bottom: none;
+}
+
+.th-num,
+.td-num {
+  text-align: right;
+}
+
+.mono {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.td-time {
+  color: var(--text-3);
+}
+
+.td-svc {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+
+.td-srv {
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
+
+.td-method {
+  color: var(--text-2);
+}
+
+.td-path {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.td-bytes {
+  color: var(--text-2);
+}
+
+/* ===== 滚动条 ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 隧道面板：不显示滚动条（出现/消失会挤压卡片宽度），滚轮/触控板滚动不受影响；
+   日志面板保留暗色滚动条便于回溯定位 */
+#tab-tunnels::-webkit-scrollbar,
+#tab-tunnels ::-webkit-scrollbar {
+  display: none;
+}
+
+/* ===== 减少动效：位移类全关（保留颜色过渡）===== */
+@media (prefers-reduced-motion: reduce) {
+  .tab-slider {
+    transition: none;
+  }
+
+  .modal-panel,
+  .modal.is-open .modal-panel,
+  .confirm-panel,
+  .confirm.is-open .confirm-panel {
+    transform: none;
+    transition: opacity var(--dur-modal) linear;
+  }
+
+  .toast,
+  .toast.is-in {
+    transform: none;
+    transition: opacity var(--dur-toast) linear;
+  }
+
+  .btn:active:not(:disabled) {
+    transform: none;
+  }
+
+  /* 卡片操作渐显：去位移动画，仅保留淡入（无时间错峰可清） */
+  .service-item .svc-op {
+    translate: none;
+    transition: opacity 260ms linear;
+  }
+
+  .update-chip.is-busy .icon,
+  .btn-icon.is-busy .icon {
+    animation: none;
+  }
+
+  .icon-popover {
+    transform: none;
+    transition: opacity 140ms linear;
+  }
+
+  .switch::after {
+    transition: none;
+  }
+}

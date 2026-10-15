@@ -1,0 +1,26 @@
+# 构建产物
+bin/
+build/bin/
+
+# 本地发布/签名/日志等私密或本机文件，绝不入库
+.release.env
+.release.env.*
+*.key
+*.pem
+*.log
+
+# wails3 生成的前端 bindings（构建时同步进 frontend/dist）
+frontend/bindings/
+frontend/dist/bindings/
+frontend/dist/icon.svg
+
+# 前端依赖（当前零构建链，预留）
+node_modules/
+
+# 工具缓存与系统文件
+.task/
+.DS_Store
+
+# 编辑器
+.idea/
+.vscode/

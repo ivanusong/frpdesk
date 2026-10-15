@@ -1,0 +1,81 @@
+version: '3'
+
+# frpdesk 构建任务：只针对 darwin/arm64，前端为零构建链纯静态文件（无 npm）。
+# 前端 bindings 由 wails3 generate bindings 生成，构建时同步进 embed 目录 frontend/dist。
+
+includes:
+  # wails3 dev 会执行 common:dev:frontend（模板约定名），实现放在 build/Taskfile.yml
+  common: ./build/Taskfile.yml
+
+vars:
+  APP_NAME: 'frpdesk'
+  BIN_DIR: 'bin'
+  # 版本唯一权威是 VERSION 文件，每次运行时读取（避免硬编码漂移）
+  VERSION:
+    sh: cat VERSION
+  GOOS_VALUE: 'darwin'
+  GOARCH_VALUE: 'arm64'
+  # wails3 dev -port 传入的变量名是 WAILS_VITE_PORT
+  VITE_PORT: '{{.WAILS_VITE_PORT | default "9245"}}'
+
+tasks:
+  # 生成前端 bindings（wails3 自带工具，不依赖 npm）
+  bindings:
+    cmds:
+      - wails3 generate bindings -b -names -clean -silent
+
+  # 把 bindings 同步进 embed 目录（embed 只认 frontend/dist）
+  build:frontend:
+    deps: [bindings]
+    sources:
+      - frontend/bindings/**/*
+      - frontend/index.html
+      - frontend/main.js
+      - frontend/style.css
+      - frontend/icon.svg
+    generates:
+      - frontend/dist/**/*
+    cmds:
+      - rm -rf frontend/dist/bindings
+      - cp -R frontend/bindings frontend/dist/bindings
+      - cp -f assets/icon.svg frontend/dist/icon.svg
+
+  # 编译二进制（production tag：资产走 embed 而非 dev server；版本由 VERSION 注入）
+  build:
+    deps: [build:frontend]
+    cmds:
+      - go build -tags production -trimpath -ldflags='-w -s -X main.currentVersion={{.VERSION}}' -o {{.BIN_DIR}}/{{.APP_NAME}} .
+    env:
+      GOOS: '{{.GOOS_VALUE}}'
+      GOARCH: '{{.GOARCH_VALUE}}'
+      CGO_ENABLED: '1'
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      CGO_CFLAGS: '-mmacosx-version-min=12.0'
+      CGO_LDFLAGS: '-mmacosx-version-min=12.0'
+
+  # 打包 .app（含 ad-hoc 签名，免签名提示）
+  package:
+    deps: [build]
+    cmds:
+      - rm -rf {{.BIN_DIR}}/{{.APP_NAME}}.app
+      - mkdir -p {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources
+      - cp build/darwin/icons.icns {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources/
+      - if [ -f build/darwin/Assets.car ]; then cp build/darwin/Assets.car {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources/; fi
+      - cp build/darwin/Info.plist {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/
+      - cp {{.BIN_DIR}}/{{.APP_NAME}} {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS/
+      # 许可证文档必须在签名前复制进 bundle（签名后不可再改 bundle 内容）。
+      - bash scripts/stage-license-docs.sh {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources
+      # 版本号注入：官方模板 plist 是占位值，签名前写入真实 VERSION
+      - plutil -replace CFBundleVersion -string '{{.VERSION}}' {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist
+      - plutil -replace CFBundleShortVersionString -string '{{.VERSION}}' {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist
+      - xattr -cr {{.BIN_DIR}}/{{.APP_NAME}}.app
+      - codesign --force --deep --sign - {{.BIN_DIR}}/{{.APP_NAME}}.app
+      - codesign --verify --deep --strict {{.BIN_DIR}}/{{.APP_NAME}}.app
+
+  # 本地开发运行（dev tag：可用 wails3 dev 热重载；此处为简单 go run）
+  run:
+    deps: [build:frontend]
+    cmds:
+      - go run -tags dev .
+    env:
+      CGO_ENABLED: '1'
