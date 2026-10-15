@@ -168,7 +168,7 @@ func TestFreshInstallAndEmptyServersNoMigration(t *testing.T) {
 	}
 }
 
-// ---------- 配置目录兼容（frpcc → frpdesk） ----------
+// ---------- 旧配置目录兼容 ----------
 
 // TestCopyLegacyConfigCopiesAndIdempotent 首次启动：新配置不存在且旧配置存在时
 // 原样复制（旧文件不删不改），复制结果可被正常加载；重复启动幂等不再复制。

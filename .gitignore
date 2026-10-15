@@ -2,9 +2,7 @@
 bin/
 build/bin/
 
-# 本地发布/签名/日志等私密或本机文件，绝不入库
-.release.env
-.release.env.*
+# 本地密钥与日志，绝不入库
 *.key
 *.pem
 *.log

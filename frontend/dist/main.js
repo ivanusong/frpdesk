@@ -156,7 +156,7 @@ function pruneMovedProxyStatus(prevServices, newServices) {
   }
 }
 
-// ---------- 旧 localStorage key 兼容（frpcc → frpdesk） ----------
+// ---------- 旧 localStorage key 兼容（只读回退，旧值不删） ----------
 // 新 key 优先；缺失时只读回退旧 key（旧值不删、不写回）。注意：bundle ID 变更后
 // WKWebView 的 localStorage 不保证与旧包共享（可能被视为不同域），因此这里只是
 // 尽力而为的读取兜底，不做复杂迁移；读不到时表现为主题/上次选择回到默认，不影响功能。

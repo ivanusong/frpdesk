@@ -1,6 +1,6 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
+<img src="build/appicon.png" width="72" height="72" alt="">
 
-# frpdesk
+# Frpdesk
 
 frpdesk is a native desktop client for [frp](https://github.com/fatedier/frp), built with [Wails v3](https://v3.wails.io). The frp client runs directly inside the app, with no sidecar process.
 

@@ -1,14 +1,13 @@
-# GitHub Actions 构建（仅产出附件，不发布 Release、不上传 MinIO、不改更新源）。
-# 单台 macos-14（ARM64）Runner 复用 build.sh：darwin arm64/amd64 + windows amd64；
-# 前端零 npm，行为验证只用 Runner 自带 Node 跑零依赖脚本。
-name: 构建
+# 构建工作流：在单台 macOS（Apple Silicon）Runner 上测试并打包三目标产物
+# （darwin arm64/amd64 + windows amd64），只上传 Actions 构建附件。
+# 前端零 npm，行为验证使用 Runner 自带 Node 运行零依赖脚本。
+name: Build
 
 on:
   push:
     branches:
       - main
       - develop
-      - GitHub
   pull_request:
   workflow_dispatch:
 
@@ -18,7 +17,7 @@ permissions:
 
 jobs:
   build:
-    name: 三目标构建（darwin arm64/amd64 + windows amd64）
+    name: 测试与三目标构建
     runs-on: macos-14
     steps:
       - name: 检出代码
@@ -65,7 +64,7 @@ jobs:
           cp "bin/frpdesk-windows-amd64.exe" "bin/frpdesk-${VERSION}-windows-amd64.exe"
           ls -lh bin/frpdesk-*
 
-      - name: 打包法律文档附件（单独随 Windows EXE 分发）
+      - name: 打包许可文档附件（单独随 Windows EXE 分发）
         run: |
           set -euo pipefail
           VERSION="$(tr -d '[:space:]' < VERSION)"

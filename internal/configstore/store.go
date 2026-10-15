@@ -272,7 +272,7 @@ func appConfigPath(dirName string) (string, error) {
 }
 
 // New 创建存储并加载配置（含旧版单全局配置的幂等迁移）。
-// 兼容旧版 frpcc 配置目录：仅当新配置不存在且旧配置存在时原样复制到新路径，
+// 兼容旧配置目录（legacyConfigDirName）：仅当新配置不存在且旧配置存在时原样复制到新路径，
 // 旧文件不改不删；复制失败直接返回错误，绝不落一份空配置冒充成功。
 func New() (*Store, error) {
 	path, err := userConfigPath()

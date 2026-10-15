@@ -2,9 +2,8 @@
 # frpdesk 一键跨平台构建：Windows amd64 + macOS arm64 + macOS amd64 一次全出。
 #
 # 可选环境变量：
-#   UPDATE_MANIFEST_URL  客户端更新源（stable.json 完整 URL）；不设置则不注入，
-#                        应用内更新检查明确禁用。真实发布由 release.sh 从 .release.env
-#                        读取后传入（仓库不内置任何具体发布地址）。
+#   UPDATE_MANIFEST_URL  自定义客户端更新源（stable.json 完整 URL）；设置后注入，
+#                        不设置则应用内更新检查明确禁用（默认不内置任何地址）。
 #
 # 流程：生成 Go bindings → 同步进 embed 目录（frontend/dist）→ 按目标矩阵编译。
 # macOS 产物打包成 .app（ad-hoc 签名）；Windows 产物为单文件 exe。
@@ -20,8 +19,7 @@
 #
 # 产物（bin/）：
 #   frpdesk-darwin-arm64.app  frpdesk-darwin-amd64.app  frpdesk-windows-amd64.exe
-#   （.app 内 Info.plist 版本号由 VERSION 文件注入；zip 只由 release.sh 在
-#    bin/releases/<版本>/ 内按版本名生成，这里不再遍历旧产物打 zip）
+#   （.app 内 Info.plist 版本号由 VERSION 文件在打包时注入）
 
 set -euo pipefail
 
@@ -31,12 +29,12 @@ cd "$SCRIPT_DIR"
 
 APP_NAME="frpdesk"
 BIN_DIR="bin"
-# 版本号唯一权威：VERSION 文件（release.sh 发布时写入新值）
+# 版本号唯一权威：VERSION 文件（发版时更新该文件）
 VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || true)"
 # 与 go.mod 里 wails v3 版本保持一致
 WAILS3_VERSION="v3.0.0-beta.28"
 
-# 客户端更新源：默认空 = 不注入，应用内更新检查禁用（具体地址只来自本地配置/release.sh）
+# 客户端更新源：默认空 = 不注入，应用内更新检查禁用（可选自定义）
 UPDATE_MANIFEST_URL="${UPDATE_MANIFEST_URL:-}"
 
 # 公共链接参数：版本号必注入；更新源只在显式配置时注入
