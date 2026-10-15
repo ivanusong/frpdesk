@@ -1,0 +1,47 @@
+name: Bug report
+description: 报告一个可复现的问题
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请先搜索已有 Issue，并尽量提供最小可复现步骤。
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / Version
+      description: 应用内显示的版本号或 commit hash
+      placeholder: "例如 0.2.9"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台 / Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - 其他 / Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: 尽量写清每一步操作与使用的配置
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期与实际 / Expected & actual
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / Logs
+      description: 应用内「日志」页或终端输出（如有）
+    validations:
+      required: false
