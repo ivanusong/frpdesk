@@ -1,0 +1,156 @@
+# 发布工作流：推送 v x.y.z tag 触发。严格校验 tag 与 VERSION、CHANGELOG 最新节完全一致，
+# 然后复用 build.sh 构建三目标产物，生成 Wails updater stable.json，并以 GitHub Release 发布。
+# 与本地私有发布流程（MinIO/rclone）无关；普通 Build 工作流保持只读、不发布。
+name: Release
+
+on:
+  push:
+    tags:
+      # tag 形如 v0.2.9；版本格式与一致性在首个步骤内严格校验
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+# 创建 Release 与上传资产需要写权限
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 版本校验、三目标构建与发布
+    runs-on: macos-14
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 校验版本一致性（tag / VERSION / CHANGELOG 最新节）
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          if ! printf '%s' "$tag_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "[release] tag 版本格式非法：${GITHUB_REF_NAME}（期望 v 前缀加三段数字）" >&2
+            exit 1
+          fi
+
+          file_version="$(tr -d '[:space:]' < VERSION)"
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "[release] tag 版本 ${tag_version} ≠ VERSION ${file_version}" >&2
+            exit 1
+          fi
+
+          changelog_version="$(grep -m1 -E '^## [0-9]+\.[0-9]+\.[0-9]+$' CHANGELOG.md | sed -E 's/^## //' || true)"
+          if [ -z "$changelog_version" ]; then
+            echo "[release] CHANGELOG.md 未找到三段版本号节" >&2
+            exit 1
+          fi
+          if [ "$tag_version" != "$changelog_version" ]; then
+            echo "[release] tag 版本 ${tag_version} ≠ CHANGELOG 最新节 ${changelog_version}" >&2
+            exit 1
+          fi
+
+          # 提前摘取当前版本节，供 Release notes 与 updater manifest 共用
+          bash scripts/release-notes.sh "$tag_version" > release-notes.md
+          echo "VERSION=${tag_version}" >> "$GITHUB_ENV"
+          echo "[release] 版本校验通过：v${tag_version}"
+
+      - name: 安装 Go（版本取自 go.mod）
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            third_party/frp/go.sum
+            third_party/wails/go.sum
+
+      - name: 安装 wails3 CLI（固定 v3.0.0-beta.28，与 go.mod 一致）
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.28
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/wails3" version
+
+      - name: 确认 Runner 自带 Node（不安装任何 npm 依赖）
+        run: node --version
+
+      - name: 单元测试
+        run: go test ./...
+
+      - name: 前端多服务端行为验证（零依赖 Node 脚本）
+        run: node scripts/verify-multiserver-ui.mjs
+
+      - name: 三目标发行构建（复用 build.sh，注入 GitHub 更新源）
+        # 客户端更新源仅在此处注入：普通 Build 工作流不设置，应用内更新检查保持禁用
+        env:
+          UPDATE_MANIFEST_URL: 'https://github.com/ivanusong/frpdesk/releases/latest/download/stable.json'
+        run: bash build.sh
+
+      - name: 打包三平台产物与许可文档包（按 VERSION 命名）
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-arm64.app" "bin/frpdesk-${VERSION}-darwin-arm64.zip"
+          ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-amd64.app" "bin/frpdesk-${VERSION}-darwin-amd64.zip"
+          cp "bin/frpdesk-windows-amd64.exe" "bin/frpdesk-${VERSION}-windows-amd64.exe"
+          bash scripts/stage-license-docs.sh "bin/frpdesk-${VERSION}-licenses"
+          ditto -c -k --norsrc "bin/frpdesk-${VERSION}-licenses" "bin/frpdesk-${VERSION}-licenses.zip"
+          rm -rf "bin/frpdesk-${VERSION}-licenses"
+          ls -lh bin/frpdesk-*
+
+      - name: 生成 Wails updater stable.json（stable 通道，notes 取自 CHANGELOG）
+        env:
+          # 产物下载根：GitHub Release 固定资产路径
+          DOWNLOAD_BASE_URL: 'https://github.com/ivanusong/frpdesk/releases/download'
+        run: |
+          set -euo pipefail
+          wails3 updater manifest \
+            -version "${VERSION}" \
+            -channel stable \
+            -name "frpdesk v${VERSION}" \
+            -url-prefix "${DOWNLOAD_BASE_URL}/v${VERSION}/" \
+            -notes-file release-notes.md \
+            -output bin/stable.json \
+            "bin/frpdesk-${VERSION}-darwin-arm64.zip" \
+            "bin/frpdesk-${VERSION}-darwin-amd64.zip" \
+            "bin/frpdesk-${VERSION}-windows-amd64.exe"
+          # 逐产物核对摘要，清单缺失/损坏时在发布前失败
+          wails3 updater verify -manifest bin/stable.json -dir bin
+
+      - name: 创建 Draft Release 并上传 5 个资产
+        # gh help release create 说明直接带资产会先建 draft、传完再发布；为不依赖
+        # Runner 上 gh 版本的具体实现，这里显式走 draft → upload → edit 发布。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --draft \
+            --title "frpdesk v${VERSION}" \
+            --notes-file release-notes.md
+          gh release upload "v${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            "bin/frpdesk-${VERSION}-darwin-arm64.zip" \
+            "bin/frpdesk-${VERSION}-darwin-amd64.zip" \
+            "bin/frpdesk-${VERSION}-windows-amd64.exe" \
+            "bin/frpdesk-${VERSION}-licenses.zip" \
+            "bin/stable.json"
+
+      - name: 校验 draft 资产齐全后发布（latest 指向的 stable.json 已就位）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          expected_assets="$(
+            printf '%s\n' \
+              "frpdesk-${VERSION}-darwin-arm64.zip" \
+              "frpdesk-${VERSION}-darwin-amd64.zip" \
+              "frpdesk-${VERSION}-windows-amd64.exe" \
+              "frpdesk-${VERSION}-licenses.zip" \
+              "stable.json" | sort
+          )"
+          actual_assets="$(gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' | sort)"
+          if [ "$actual_assets" != "$expected_assets" ]; then
+            echo "[release] draft 资产与预期不符，拒绝发布：" >&2
+            printf '%s\n' "$actual_assets" >&2
+            exit 1
+          fi
+          gh release edit "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false
+          echo "[release] 已发布 v${VERSION}（5 个资产齐全，latest/download/stable.json 生效）"

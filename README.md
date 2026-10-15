@@ -22,6 +22,18 @@ wails3 dev          # run locally
 go test ./...       # run tests
 ```
 
+## Release
+
+Push a `vX.Y.Z` tag. Its version must match both `VERSION` and the newest `## X.Y.Z`
+section of [CHANGELOG.md](CHANGELOG.md); the
+[Release workflow](.github/workflows/release.yml) then runs the tests, builds the
+macOS and Windows artifacts, generates the Wails updater `stable.json` from the
+CHANGELOG notes, and publishes everything as a GitHub Release.
+
+Shipped builds check for updates at
+`https://github.com/ivanusong/frpdesk/releases/latest/download/stable.json`.
+
+
 ## License
 
 [Apache-2.0](LICENSE). Third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
