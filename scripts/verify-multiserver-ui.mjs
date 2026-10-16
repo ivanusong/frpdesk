@@ -911,7 +911,34 @@ check("编辑 UDP：协议回显 UDP 且字段组可见", protoSel.value === "ud
 protoSel.value = "tcp";
 protoSel.dispatchEvent({ type: "change", bubbles: true });
 check("编辑 UDP 切 TCP：类型随动（提交按新协议）", document.getElementById("service-form").elements.type.value === "tcp");
+// 布局：服务名称与协议同一行（3:1），协议 label 承载 data-fields 显隐语义
+const nameProtoRow = document.querySelector("#service-form .service-name-proto-row");
+const nameInputEl = document.getElementById("service-form").elements.name;
+check(
+  "布局 TCP/UDP：name 与 proto 同容器（两个同级 label，名称在左）",
+  Boolean(nameProtoRow) &&
+    nameProtoRow === nameInputEl.closest(".service-name-proto-row") &&
+    protoRow.parent === nameProtoRow &&
+    protoRow.hidden === false &&
+    nameProtoRow.children.length === 2 &&
+    nameProtoRow.children.every((c) => c.tagName === "LABEL") &&
+    nameProtoRow.children[0].contains(nameInputEl) &&
+    nameProtoRow.children[1] === protoRow,
+  `row=${nameProtoRow?.className} / children=${nameProtoRow?.children.length} / protoHidden=${protoRow.hidden}`,
+);
 T.closeServiceModal();
+await sleep(450);
+// 布局 HTTP：协议隐藏、名称仍在专用行内（整行回退由 CSS 单列规则保证）
+T.openServiceModal("新增 HTTP 服务", null, "http");
+check(
+  "布局 HTTP：proto 隐藏且 name 仍在专用行（回退整行）",
+  protoRow.hidden === true &&
+    nameInputEl.closest(".service-name-proto-row") === nameProtoRow &&
+    nameProtoRow.children[0].contains(nameInputEl),
+  `protoHidden=${protoRow.hidden}`,
+);
+T.closeServiceModal();
+await sleep(450);
 
 // ---------- 场景 S8：底部隧道计数（registered/enabled）+ proxy 事件刷新 + 移走清旧态 ----------
 currentSnapshot = makeSnapshot();
@@ -1337,6 +1364,19 @@ check(
 // ---------- 服务器卡片专用 CSS ----------
 check("服务器卡无 hover 隐藏/translate 残留", !css.includes(".server-item .svc-op"));
 check("服务器卡底行落底（margin-top:auto）", /\.server-ops \{[^}]*margin-top: auto;/.test(css));
+
+// ---------- 服务名称 + 协议行专用 CSS ----------
+check(
+  "CSS：服务名称+协议行为 3fr 1fr 网格且 label 允许收缩",
+  /\.service-name-proto-row \{[^}]*display: grid;[^}]*grid-template-columns: 3fr 1fr;/.test(css) &&
+    /\.service-name-proto-row > label \{[^}]*min-width: 0;/.test(css),
+  "缺少 .service-name-proto-row 网格或 label min-width:0 规则",
+);
+check(
+  "CSS：HTTP（协议 hidden）时名称回退单列整行",
+  /\.service-name-proto-row:has\(> label\[data-fields="proto"\]\[hidden\]\) \{[^}]*grid-template-columns: 1fr;/.test(css),
+  "缺少协议隐藏时的单列回退规则",
+);
 
 // ---------- 场景 S12：隧道卡片拖拽排序（仅 handle 可拖；事件不重建；持久化/回弹） ----------
 // 三卡快照 + 手工几何（offsetTop 0/80/160，高 70，槽高 80），验证：
