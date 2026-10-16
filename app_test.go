@@ -166,6 +166,78 @@ func TestSetLanguagePersistsAndApplies(t *testing.T) {
 	}
 }
 
+// TestReorderServicesRPC 排序绑定：按给定顺序重排并落盘；缺 ID/重复/未知 ID 拒绝；
+// 排序仅动配置数组顺序——不 reconcile，不触发任何实例对齐（状态保持 stopped）。
+func TestReorderServicesRPC(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	svc := &AppService{
+		store:  configstore.NewAtPath(path),
+		tunnel: tunnel.NewManager(),
+		stats:  stats.NewCollector(),
+	}
+	svc.syncStatsMappings()
+	t.Cleanup(func() { svc.tunnel.StopAll() })
+
+	sa, err := svc.store.CreateServer(configstore.ServerInput{
+		Name: "甲", ServerAddr: "a.com", ServerPort: 7000, HTTPEnabled: true, BaseDomain: "a.com", Scheme: "https",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i, name := range []string{"web1", "web2", "web3"} {
+		cfg, err := svc.store.CreateService(configstore.ServiceInput{
+			ServerID: sa.Servers[0].ID, Name: name, LocalPort: 8001 + i, Subdomain: name, Enabled: true, Type: "http",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, cfg.Services[len(cfg.Services)-1].ID)
+	}
+
+	// 成功：按给定顺序重排，返回值与落盘均为新序
+	want := []string{ids[2], ids[0], ids[1]}
+	snap, err := svc.ReorderServices(want)
+	if err != nil {
+		t.Fatalf("合法重排应成功: %v", err)
+	}
+	for i, id := range want {
+		if snap.Config.Services[i].ID != id {
+			t.Fatalf("快照顺序应为给定次序: %+v", snap.Config.Services)
+		}
+	}
+	reloaded := configstore.NewAtPath(path)
+	for i, id := range want {
+		if reloaded.Config().Services[i].ID != id {
+			t.Fatalf("重排应落盘（刷新/重启后保持）: %+v", reloaded.Config().Services)
+		}
+	}
+
+	// 严格校验：缺 ID / 重复 / 未知 ID 拒绝，顺序不变
+	for name, bad := range map[string][]string{
+		"缺 ID":  {want[0], want[1]},
+		"重复 ID": {want[0], want[0], want[1]},
+		"未知 ID": {want[0], want[1], "ghost"},
+	} {
+		if _, err := svc.ReorderServices(bad); err == nil {
+			t.Fatalf("%s 应拒绝", name)
+		}
+		for i, id := range want {
+			if got := svc.Snapshot().Config.Services[i].ID; got != id {
+				t.Fatalf("%s 拒绝后顺序不得变化: %v", name, got)
+			}
+		}
+	}
+
+	// 不 reconcile：无实例被拉起，聚合状态仍 stopped
+	if got := svc.tunnel.ServerStatuses(); len(got) != 0 {
+		t.Fatalf("排序不得触发实例对齐: %+v", got)
+	}
+	if st := svc.Snapshot().Status; st.State != configstore.StateStopped || st.ActiveCount != 0 {
+		t.Fatalf("排序后聚合状态应保持 stopped: %+v", st)
+	}
+}
+
 // TestDisableLastServiceAutoStops 禁用最后一个 enabled 隧道自动停止：
 // 聚合回到 stopped 0/0（LoginFailExit=false 下坏服务器为 starting 重试中，
 // 停止经 cancel 终止重试）。

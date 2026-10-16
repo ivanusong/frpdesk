@@ -962,6 +962,38 @@ func (s *Store) DeleteService(id string) (Config, error) {
 	return s.cloneConfig(), nil
 }
 
+// ReorderServices 按给定 ID 顺序重排隧道（仅配置数组顺序变化）：服务字段一律不动，
+// 不涉及启停/重连语义。ids 必须与当前服务集合严格一一对应——数量一致、无重复、
+// 无未知 ID，任一不满足立即拒绝，绝不落盘，避免出现半更新状态。
+func (s *Store) ReorderServices(ids []string) (Config, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(ids) != len(s.cfg.Services) {
+		return s.cloneConfig(), i18n.LErr("err.reorderCount", len(s.cfg.Services), len(ids))
+	}
+	pos := make(map[string]int, len(ids))
+	for i, id := range ids {
+		if _, dup := pos[id]; dup {
+			return s.cloneConfig(), i18n.LErr("err.reorderDup", id)
+		}
+		pos[id] = i
+	}
+	reordered := make([]Service, len(s.cfg.Services))
+	for _, svc := range s.cfg.Services {
+		p, ok := pos[svc.ID]
+		if !ok {
+			return s.cloneConfig(), i18n.LErr("err.reorderUnknown", svc.ID)
+		}
+		reordered[p] = svc // 按目标位次落座：字段原样搬运，不改任何服务内容
+	}
+	s.cfg.Services = reordered
+	if err := s.save(); err != nil {
+		return s.cloneConfig(), err
+	}
+	return s.cloneConfig(), nil
+}
+
 var subdomainRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
 
 // validateSubdomain 校验子域名前缀（3-63 位小写字母/数字/短横线）。

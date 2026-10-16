@@ -513,6 +513,18 @@ func (a *AppService) DeleteService(id string) (configstore.Snapshot, error) {
 	return a.Snapshot(), nil
 }
 
+// ReorderServices 按前端给定顺序重排隧道卡片（卡片拖拽排序，仅配置数组顺序变化）：
+// store 层严格校验 IDs 与服务集合一一对应；此操作**不** reconcile、不触发 frpc
+// 重连/启停/注册变更，成功后推送最新快照（前端以事件为权威）。
+func (a *AppService) ReorderServices(ids []string) (configstore.Snapshot, error) {
+	slog.Info("[ui] tunnels reordered", "count", len(ids))
+	if _, err := a.store.ReorderServices(ids); err != nil {
+		return a.Snapshot(), a.fail("reorder tunnels", err)
+	}
+	a.emitSnapshot()
+	return a.Snapshot(), nil
+}
+
 // QuitApp 前端「退出程序」入口（二次确认后调用）：复用托盘退出路径——
 // 置 quitting 后 app.Quit，ServiceShutdown 负责停止全部隧道等清理。
 func (a *AppService) QuitApp() {
