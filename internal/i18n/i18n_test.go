@@ -261,3 +261,30 @@ func TestErrKeepsSentinel(t *testing.T) {
 		t.Fatal("errors.Is 应命中哨兵错误")
 	}
 }
+
+// TestTLEnAndErrText 固定英文通道（终端日志用）：TLEn 不随当前语言；
+// ErrText 对双语错误（LocalizedError 包装链）与哨兵包装错误取英文渲染，
+// 普通错误（FRP/OS 原始错误）保持原文。
+func TestTLEnAndErrText(t *testing.T) {
+	resetZH(t)
+	Set(ZH) // 中文界面下日志通道仍必须英文
+	if got := TLEn("msg.stopping"); got != "Stopping" {
+		t.Fatalf("TLEn(zh 下) = %q, want Stopping", got)
+	}
+	if got := TLEn("msg.noEnabled", "服务器A"); got != `Server "服务器A" has no enabled tunnels` {
+		t.Fatalf("TLEn 插值 = %q（用户名允许原样）", got)
+	}
+	le := LErrWrap("err.svcProxyFail", errors.New("listen tcp: address in use"), "服务A")
+	if got := ErrText(le); got != "Failed to create the local proxy for service 服务A: listen tcp: address in use" {
+		t.Fatalf("ErrText(LocalizedError) = %q", got)
+	}
+	if got := ErrText(Err(errors.New("updater busy"), "err.updaterBusy")); got != "Another update operation is in progress; try again later" {
+		t.Fatalf("ErrText(哨兵包装) = %q", got)
+	}
+	if got := ErrText(errors.New("raw frp error")); got != "raw frp error" {
+		t.Fatalf("ErrText(普通错误) 应原样 = %q", got)
+	}
+	if got := ErrText(nil); got != "" {
+		t.Fatalf("ErrText(nil) = %q, want empty", got)
+	}
+}

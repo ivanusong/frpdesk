@@ -109,6 +109,12 @@ func T(key string, args ...any) string {
 	return TL(Current(), key, args...)
 }
 
+// TLEn 固定英文取词（终端诊断日志通道专用）：与 T 同插值规则，但恒用英文文案，
+// 保证日志输出不随界面语言变化（状态/错误等 UI 仍走 T 保持双语）。
+func TLEn(key string, args ...any) string {
+	return TL(EN, key, args...)
+}
+
 // TL 指定语言取文案（测试与回退逻辑复用）。
 func TL(l Lang, key string, args ...any) string {
 	if l != ZH && l != EN {
@@ -152,7 +158,8 @@ func interpolate(text string, args ...any) string {
 }
 
 // sentinelError 包装哨兵错误：Error() 按当前语言渲染，Unwrap 保留哨兵身份
-// （errors.Is 继续命中原哨兵，调用方分支判断不受影响）。
+// （errors.Is 继续命中原哨兵，调用方分支判断不受影响）；EN() 固定英文
+// （日志通道用，见 ErrText）。
 type sentinelError struct {
 	sentinel error
 	key      string
@@ -160,6 +167,7 @@ type sentinelError struct {
 }
 
 func (e *sentinelError) Error() string { return T(e.key, e.args...) }
+func (e *sentinelError) EN() string    { return TLEn(e.key, e.args...) }
 func (e *sentinelError) Unwrap() error { return e.sentinel }
 
 // Err 返回保留哨兵身份（errors.Is）且消息按当前语言渲染的错误。
@@ -206,7 +214,7 @@ func (e *LocalizedError) EN() string {
 	return msg
 }
 
-// ErrText 返回错误的「固定英文」文本：LocalizedError 取英文渲染
+// ErrText 返回错误的「固定英文」文本：LocalizedError/sentinelError 取英文渲染
 // （状态/错误 UI 仍走 Error() 保持双语），其余错误保持原文
 // （FRP/OS 原始错误不在本类型体系内，原样进日志便于排查）。
 func ErrText(err error) string {
@@ -216,6 +224,10 @@ func ErrText(err error) string {
 	var le *LocalizedError
 	if errors.As(err, &le) {
 		return le.EN()
+	}
+	var se interface{ EN() string }
+	if errors.As(err, &se) {
+		return se.EN()
 	}
 	return err.Error()
 }

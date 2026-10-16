@@ -165,7 +165,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 		defer func() { <-probeConcurrency }()
 	case remaining := <-time.After(time.Until(deadline)):
 		_ = remaining
-		slog.Info("[探测] 排队超时", "server", server.Name, "id", server.ID)
+		slog.Info("[probe] queue timeout", "server", server.Name, "id", server.ID)
 		res.Message = i18n.T("probe.queueTimeout")
 		return res
 	}
@@ -188,7 +188,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 	configSource := source.NewConfigSource()
 	if err := configSource.ReplaceAll(nil, nil); err != nil { // 无代理：不注册任何隧道
 		res.Message = i18n.T("probe.initFail")
-		slog.Warn("[探测] 配置源初始化失败", "server", server.Name, "id", server.ID, "err", err)
+		slog.Warn("[probe] failed to initialize the config source", "server", server.Name, "id", server.ID, "err", err)
 		return res
 	}
 	svc, err := client.NewService(client.ServiceOptions{
@@ -198,7 +198,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 	})
 	if err != nil {
 		res.Message = i18n.T("probe.createFail")
-		slog.Warn("[探测] 创建 frpc 失败", "server", server.Name, "id", server.ID, "err", err)
+		slog.Warn("[probe] failed to create frpc", "server", server.Name, "id", server.ID, "err", err)
 		return res
 	}
 
@@ -207,7 +207,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 		done <- svc.Run(ctx)
 	}()
 
-	slog.Info("[探测] 开始", "server", server.Name, "id", server.ID,
+	slog.Info("[probe] started", "server", server.Name, "id", server.ID,
 		"addr", server.ServerAddr, "port", server.ServerPort)
 	ticker := time.NewTicker(probePollInterval)
 	defer ticker.Stop()
@@ -215,7 +215,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 		select {
 		case runErr := <-done:
 			// 首登失败即退出（Run 已自然收尾）：按原始错误分类为用户可读消息
-			slog.Info("[探测] 登录失败", "server", server.Name, "id", server.ID,
+			slog.Info("[probe] login failed", "server", server.Name, "id", server.ID,
 				"addr", server.ServerAddr, "port", server.ServerPort,
 				"elapsed", time.Since(started), "rawErr", runErr)
 			res.Message = classifyProbeFailure(runErr)
@@ -224,7 +224,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 			// 整体时限到：强制中断在途登录读，然后等待 Run 完整收尾再返回
 			tracker.shutdown()
 			<-done
-			slog.Info("[探测] 超时", "server", server.Name, "id", server.ID,
+			slog.Info("[probe] timed out", "server", server.Name, "id", server.ID,
 				"addr", server.ServerAddr, "port", server.ServerPort, "timeout", probeTimeout)
 			res.Message = i18n.T("probe.timeout")
 			return res
@@ -237,7 +237,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 				res.Success = true
 				res.LatencyMs = latency.Milliseconds()
 				res.Message = i18n.T("probe.ok")
-				slog.Info("[探测] 成功", "server", server.Name, "id", server.ID,
+				slog.Info("[probe] succeeded", "server", server.Name, "id", server.ID,
 					"latencyMs", res.LatencyMs)
 				return res
 			}

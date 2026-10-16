@@ -418,7 +418,9 @@ const appStub = {
   ProxyStatuses() {
     return Promise.resolve(this.record("ProxyStatuses", []));
   },
-  FrontendLog() {
+  FrontendLog(level, message) {
+    // 记录诊断通道载荷：验证「本地化（中文）错误详情不进入英文日志通道」
+    this.record("FrontendLog", [level, message]);
     return Promise.resolve();
   },
   UpdateInfo() {
@@ -987,7 +989,23 @@ appStub.results.TestServerConnection = new Error("RPC 断开");
 testBtnOf().click();
 await sleep(30);
 check("RPC 异常：toast 失败原因且按钮恢复", lastToast().includes("测试连接失败") && lastToast().includes("RPC 断开") && testBtnOf().textContent === "测试" && !testBtnOf().disabled);
+// 诊断通道（FrontendLog）固定英文：本地化（中文）错误详情不回流日志通道，
+// toast 仍按当前语言展示原始错误详情
 delete appStub.results.TestServerConnection;
+const flExpect = appStub.calls.filter((c) => c.name === "FrontendLog").at(-1)?.args?.[1] ?? "";
+check(
+  "诊断日志固定英文：中文错误详情被过滤（toast 仍双语）",
+  flExpect.includes("Test connection failed") && !/[\p{Script=Han}]/u.test(flExpect) && lastToast().includes("RPC 断开"),
+  flExpect,
+);
+// enDetail 直接单测：英文技术错误原样保留，本地化错误用英文占位
+check(
+  "enDetail：英文错误原样保留/本地化错误不进入英文通道",
+  T.enDetail(new Error("transport closed")) === "transport closed" &&
+    T.enDetail(new Error("服务器名称不能为空")).startsWith("localized UI error") &&
+    T.enDetail(undefined) === "",
+  `${T.enDetail(new Error("transport closed"))} | ${T.enDetail(new Error("服务器名称不能为空"))}`,
+);
 
 // ---------- 场景 S10：双语切换、回退、写入生命周期与动态渲染 ----------
 // 预置 zh-CN（同 harness 初始化 + 快照 language 字段）；覆盖：

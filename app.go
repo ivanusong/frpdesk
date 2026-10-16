@@ -33,13 +33,14 @@ type AppService struct {
 func NewAppService() *AppService {
 	store, err := configstore.New()
 	if err != nil {
-		slog.Error("初始化配置存储失败", "err", err)
+		// 日志固定英文：配置错误为双语错误，取英文渲染（UI 不展示此致命错误）
+		slog.Error("failed to initialize the config store", "err", i18n.ErrText(err))
 		panic(err)
 	}
 	// 按持久化偏好解析界面语言（system 时探测系统语言）：必须在托盘/窗口
 	// 装配前完成，保证启动时的托盘菜单与状态就是用户语言。
 	i18n.SetPreference(store.Language())
-	slog.Info("[i18n] 界面语言已解析", "lang", i18n.Current(), "pref", store.Language())
+	slog.Info("[i18n] UI language resolved", "lang", i18n.Current(), "pref", store.Language())
 	mgr := tunnel.NewManager()
 
 	// 请求统计：collector 与 App 同生命周期（不随隧道启停清零，重启归零）；
@@ -127,7 +128,7 @@ func (a *AppService) ServiceStartup(_ context.Context, _ application.ServiceOpti
 // 先置位托盘 quitting：wails cleanup 顺序是先停服务再销毁窗口/托盘，
 // 期间状态回调仍会到达，置位后跳过 UI 更新，避免退出回调卡死或触碰已销毁对象。
 func (a *AppService) ServiceShutdown() error {
-	slog.Info("[退出] ServiceShutdown：停止所有隧道")
+	slog.Info("[shutdown] ServiceShutdown: stopping all tunnels")
 	a.up.shutdown() // 先取消后台更新检查与进行中的下载/安装
 	if a.tray != nil {
 		a.tray.markQuitting()
@@ -182,12 +183,13 @@ func (a *AppService) UpdateInfo() UpdateInfo {
 // CheckForUpdates 手动检查更新（与启动/定时检查互斥，忙时返回明确错误）。
 // 来源标签进入日志通道，约定固定英文（不随界面语言翻译）。
 func (a *AppService) CheckForUpdates() (UpdateInfo, error) {
-	return a.up.check("manual check")
+	info, err := a.up.check("manual check")
+	return info, a.fail("check for updates", err)
 }
 
 // InstallUpdate 用户确认后的下载安装重启（无已检查新版时返回明确错误）。
 func (a *AppService) InstallUpdate() error {
-	return a.up.install()
+	return a.fail("install update", a.up.install())
 }
 
 // showMainWindow 统一恢复主窗口：托盘菜单/Dock reopen/第二实例启动共用。
@@ -209,6 +211,17 @@ func (a *AppService) FrontendLog(level, message string) error {
 	return nil
 }
 
+// fail 统一收口业务 RPC 失败：终端诊断日志固定英文（操作名 + ErrText 错误详情），
+// 返回给前端的仍是当前语言错误（toast 等 UI 继续双语）。前端诊断通道不再回传
+// 本地化错误详情（避免中文经 FrontendLog 回流到英文日志）。
+func (a *AppService) fail(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	slog.Error("[ui] "+op+" failed", "err", i18n.ErrText(err))
+	return err
+}
+
 // LanguageState 语言状态：绑定返回的最小契约 = 持久化偏好 + 后端解析后的生效语言。
 // 前端据此对齐 UI 语言（system 时不再自行用 navigator 独立判定）。
 type LanguageState struct {
@@ -222,13 +235,13 @@ type LanguageState struct {
 // 不触碰隧道/服务器状态（不重启隧道）。
 func (a *AppService) SetLanguage(pref string) (LanguageState, error) {
 	if !i18n.IsValidPref(pref) {
-		return a.languageState(), errors.New(i18n.T("err.invalidLanguage"))
+		return a.languageState(), a.fail("set language", i18n.LErr("err.invalidLanguage"))
 	}
 	if err := a.store.SetLanguage(pref); err != nil {
-		return a.languageState(), err
+		return a.languageState(), a.fail("set language", err)
 	}
 	lang := i18n.SetPreference(pref)
-	slog.Info("[i18n] 语言已切换", "pref", pref, "lang", lang)
+	slog.Info("[i18n] language changed", "pref", pref, "lang", lang)
 	if a.tray != nil {
 		a.tray.applyLanguage()
 	}
@@ -274,9 +287,13 @@ func (a *AppService) buildSnapshot() configstore.Snapshot {
 			total++
 		}
 	}
+	// 聚合消息双通道：Status.Message 按当前语言（UI），MessageEN 固定英文
+	//（终端诊断日志；托盘状态 slog 走 LogMessage() 取这条）
+	status := configstore.AggregateStatus(list, total)
+	status.MessageEN = configstore.AggregateStatusEN(list, total).Message
 	return configstore.Snapshot{
 		Config:         cfg,
-		Status:         configstore.AggregateStatus(list, total),
+		Status:         status,
 		ServerStatuses: list,
 		Language:       string(i18n.Current()),
 	}
@@ -303,7 +320,7 @@ func (a *AppService) emitSnapshot() {
 // Logs 返回当前缓冲的全部日志。
 func (a *AppService) Logs() []configstore.LogEntry {
 	logs := a.tunnel.Logs()
-	slog.Info("[前端] 拉取日志", "count", len(logs), "state", a.tunnel.Status().State)
+	slog.Info("[ui] logs fetched", "count", len(logs), "state", a.tunnel.Status().State)
 	return logs
 }
 
@@ -323,10 +340,10 @@ func (a *AppService) Stats() stats.Snapshot {
 
 // CreateServer 新增服务器：若其下已有 enabled 隧道（导入/恢复场景）会自动连接。
 func (a *AppService) CreateServer(input configstore.ServerInput) (configstore.Snapshot, error) {
-	slog.Info("[前端] 新增服务器", "name", input.Name, "addr", input.ServerAddr, "port", input.ServerPort)
+	slog.Info("[ui] server created", "name", input.Name, "addr", input.ServerAddr, "port", input.ServerPort)
 	cfg, err := a.store.CreateServer(input)
 	if err != nil {
-		return a.Snapshot(), err
+		return a.Snapshot(), a.fail("create server", err)
 	}
 	if len(cfg.Servers) > 0 {
 		newest := cfg.Servers[len(cfg.Servers)-1]
@@ -339,10 +356,10 @@ func (a *AppService) CreateServer(input configstore.ServerInput) (configstore.Sn
 // UpdateServer 编辑服务器：立即应用——连接参数变化仅重连该服务器，
 // 元数据变化不影响连接；未连接的服务器只保存。
 func (a *AppService) UpdateServer(id string, input configstore.ServerInput) (configstore.Snapshot, error) {
-	slog.Info("[前端] 编辑服务器", "id", id, "name", input.Name)
+	slog.Info("[ui] server updated", "id", id, "name", input.Name)
 	cfg, err := a.store.UpdateServer(id, input)
 	if err != nil {
-		return a.Snapshot(), err
+		return a.Snapshot(), a.fail("update server", err)
 	}
 	a.syncStatsMappings()
 	// 按期望态对齐：连接参数变化仅重连自身；元数据/代理变化热更新；有 enabled
@@ -357,9 +374,9 @@ func (a *AppService) UpdateServer(id string, input configstore.ServerInput) (con
 
 // DeleteServer 删除服务器（被任何隧道引用——含停用——则阻止）。
 func (a *AppService) DeleteServer(id string) (configstore.Snapshot, error) {
-	slog.Info("[前端] 删除服务器", "id", id)
+	slog.Info("[ui] server deleted", "id", id)
 	if _, err := a.store.DeleteServer(id); err != nil {
-		return a.Snapshot(), err
+		return a.Snapshot(), a.fail("delete server", err)
 	}
 	a.syncStatsMappings()
 	a.emitSnapshot()
@@ -414,10 +431,10 @@ func (a *AppService) reconcileServers(cfg configstore.Config, serverIDs ...strin
 
 // CreateService 新增穿透隧道；受影响服务器按期望态自动对齐（enabled>0 即连接）。
 func (a *AppService) CreateService(input configstore.ServiceInput) (configstore.Snapshot, error) {
-	slog.Info("[前端] 新增服务", "name", input.Name, "serverId", input.ServerID, "type", input.Type)
+	slog.Info("[ui] tunnel created", "name", input.Name, "serverId", input.ServerID, "type", input.Type)
 	cfg, err := a.store.CreateService(input)
 	if err != nil {
-		return a.Snapshot(), err
+		return a.Snapshot(), a.fail("create tunnel", err)
 	}
 	a.reconcileServers(cfg, input.ServerID)
 	a.emitSnapshot()
@@ -427,7 +444,7 @@ func (a *AppService) CreateService(input configstore.ServiceInput) (configstore.
 // UpdateService 编辑穿透隧道：跨服务器移动时先旧服务器移除代理、新服务器再应用；
 // 全部本地校验通过才保存（store 层保证）。
 func (a *AppService) UpdateService(id string, input configstore.ServiceInput) (configstore.Snapshot, error) {
-	slog.Info("[前端] 编辑服务", "id", id, "name", input.Name, "serverId", input.ServerID)
+	slog.Info("[ui] tunnel updated", "id", id, "name", input.Name, "serverId", input.ServerID)
 	old := a.store.Config()
 	var oldServerID string
 	for i := range old.Services {
@@ -438,7 +455,7 @@ func (a *AppService) UpdateService(id string, input configstore.ServiceInput) (c
 	}
 	cfg, err := a.store.UpdateService(id, input)
 	if err != nil {
-		return a.Snapshot(), err
+		return a.Snapshot(), a.fail("update tunnel", err)
 	}
 	a.reconcileServers(cfg, oldServerID, input.ServerID)
 	a.emitSnapshot()
@@ -447,7 +464,7 @@ func (a *AppService) UpdateService(id string, input configstore.ServiceInput) (c
 
 // SetServiceEnabled 切换隧道 enabled 开关；撤销最后一个 enabled 隧道会停止该服务器连接。
 func (a *AppService) SetServiceEnabled(id string, enabled bool) (configstore.Snapshot, error) {
-	slog.Info("[前端] 切换服务开关", "id", id, "enabled", enabled)
+	slog.Info("[ui] tunnel toggle", "id", id, "enabled", enabled)
 	prev := a.store.Config()
 	var serverID string
 	for i := range prev.Services {
@@ -458,7 +475,7 @@ func (a *AppService) SetServiceEnabled(id string, enabled bool) (configstore.Sna
 	}
 	cfg, err := a.store.SetServiceEnabled(id, enabled)
 	if err != nil {
-		return a.Snapshot(), err
+		return a.Snapshot(), a.fail("toggle tunnel", err)
 	}
 	a.reconcileServers(cfg, serverID)
 	a.emitSnapshot()
@@ -467,7 +484,7 @@ func (a *AppService) SetServiceEnabled(id string, enabled bool) (configstore.Sna
 
 // DeleteService 删除穿透隧道；该服务器最后一个 enabled 隧道被删则停止连接。
 func (a *AppService) DeleteService(id string) (configstore.Snapshot, error) {
-	slog.Info("[前端] 删除服务", "id", id)
+	slog.Info("[ui] tunnel deleted", "id", id)
 	prev := a.store.Config()
 	var serverID string
 	for i := range prev.Services {
@@ -478,7 +495,7 @@ func (a *AppService) DeleteService(id string) (configstore.Snapshot, error) {
 	}
 	cfg, err := a.store.DeleteService(id)
 	if err != nil {
-		return a.Snapshot(), err
+		return a.Snapshot(), a.fail("delete tunnel", err)
 	}
 	a.reconcileServers(cfg, serverID)
 	a.emitSnapshot()
@@ -488,7 +505,7 @@ func (a *AppService) DeleteService(id string) (configstore.Snapshot, error) {
 // QuitApp 前端「退出程序」入口（二次确认后调用）：复用托盘退出路径——
 // 置 quitting 后 app.Quit，ServiceShutdown 负责停止全部隧道等清理。
 func (a *AppService) QuitApp() {
-	slog.Info("[前端] 点击退出程序")
+	slog.Info("[ui] quit requested")
 	if a.tray != nil {
 		a.tray.quit()
 	}
@@ -502,12 +519,12 @@ func (a *AppService) PublicURL(id string) (string, error) {
 		if svc.ID == id {
 			server, ok := cfg.ServerByID(svc.ServerID)
 			if !ok {
-				return "", errors.New(i18n.T("err.tunnelServerMissing"))
+				return "", a.fail("resolve public URL", i18n.LErr("err.tunnelServerMissing"))
 			}
 			return configstore.PublicURL(server, svc), nil
 		}
 	}
-	return "", errors.New(i18n.T("err.serviceNotFound"))
+	return "", a.fail("resolve public URL", i18n.LErr("err.serviceNotFound"))
 }
 
 // TestServerConnection 独立测试已保存服务器的 FRPS 控制连通性。
@@ -517,10 +534,10 @@ func (a *AppService) TestServerConnection(serverId string) (tunnel.ServerConnect
 	cfg := a.store.Config()
 	server, ok := cfg.ServerByID(serverId)
 	if !ok {
-		return tunnel.ServerConnectionTestResult{}, errors.New(i18n.T("err.serverNotFound"))
+		return tunnel.ServerConnectionTestResult{}, a.fail("test server connection", i18n.LErr("err.serverNotFound"))
 	}
 	res := tunnel.TestServerConnection(server)
-	slog.Info("[前端] 服务器连通性探测完成",
+	slog.Info("[ui] server connection probe finished",
 		"id", serverId, "name", server.Name, "success", res.Success, "latencyMs", res.LatencyMs)
 	return res, nil
 }
@@ -529,7 +546,7 @@ func (a *AppService) TestServerConnection(serverId string) (tunnel.ServerConnect
 func (a *AppService) QRCode(url string) (string, error) {
 	png, err := qrcode.Encode(url, qrcode.Medium, 512)
 	if err != nil {
-		return "", err
+		return "", a.fail("generate QR code", err)
 	}
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png), nil
 }

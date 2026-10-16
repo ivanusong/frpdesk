@@ -347,7 +347,7 @@ function setLanguagePref(pref) {
       const msg = t("lang.syncFail", err?.message ?? err);
       toast("error", msg);
       try {
-        await api.AppService.FrontendLog("error", msg);
+        await api.AppService.FrontendLog("error", tEn("lang.syncFail", enDetail(err)));
       } catch {}
       return null;
     }
@@ -790,6 +790,16 @@ function applyConfigOnly(snapshot) {
 
 // ---------- 后端调用 ----------
 
+// HAN_RE / enDetail：诊断日志通道的错误详情一律英文。后端业务错误按当前界面
+// 语言渲染（中文时含 CJK），不能进入英文日志通道；后端已在 RPC 边界（
+// AppService.fail）记录英文错误详情，此处用固定英文占位保留可读性。
+// 英文技术错误（绑定/传输失败等）原样保留。
+const HAN_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+function enDetail(err) {
+  const msg = String(err?.message ?? err ?? "");
+  return HAN_RE.test(msg) ? "localized UI error (backend log has details)" : msg;
+}
+
 async function run(key, fn) {
   try {
     return await fn();
@@ -798,7 +808,7 @@ async function run(key, fn) {
     const msg = t("run.fail", t(key), err.message ?? err);
     toast("error", msg);
     try {
-      await api.AppService.FrontendLog("error", tEn("run.fail", tEn(key), err.message ?? err));
+      await api.AppService.FrontendLog("error", tEn("run.fail", tEn(key), enDetail(err)));
     } catch {}
     throw err;
   }
@@ -898,7 +908,7 @@ async function refreshStats() {
     if (!state.stats.errLogged) {
       state.stats.errLogged = true;
       try {
-        await api.AppService.FrontendLog("error", tEn("stats.fetchFailLog", state.stats.error));
+        await api.AppService.FrontendLog("error", tEn("stats.fetchFailLog", enDetail(state.stats.error)));
       } catch {}
     }
     renderStatsError();
@@ -2496,7 +2506,7 @@ const tryFetch = async (label, fn, attempts) => {
     } catch (err) {
       lastErr = err;
       try {
-        await api.AppService.FrontendLog("error", `${label} #${i + 1} failed: ${err.message ?? err}`);
+        await api.AppService.FrontendLog("error", `${label} #${i + 1} failed: ${enDetail(err)}`);
       } catch {}
       await sleep(400 * (i + 1));
     }
@@ -2528,4 +2538,6 @@ export const __test = {
   reconcileLanguageFromSnapshot,
   langSync,
   t,
+  // 诊断通道英文详情过滤（本地化错误不回流日志通道）
+  enDetail,
 };

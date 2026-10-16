@@ -180,7 +180,7 @@ func newTrayController(app *application.App, window *application.WebviewWindow, 
 // hideToTray 隐藏主窗口并收起 Dock 图标；托盘常驻，隧道不受影响。
 // Hide 与 Dock 策略在同一主线程闭包按序执行（见文件头要点）。
 func (t *trayController) hideToTray() {
-	slog.Info("[托盘] 隐藏主窗口到托盘")
+	slog.Info("[tray] main window hidden to tray")
 	application.InvokeAsync(func() {
 		if t.quitting.Load() {
 			return
@@ -193,7 +193,7 @@ func (t *trayController) hideToTray() {
 // restoreWindow 恢复原窗口：Dock 图标 → 还原最小化 → 显示 → 焦点 → 前台激活。
 // 菜单/托盘 reopen/第二实例三条路径统一走这里，动作在同一主线程闭包按序执行。
 func (t *trayController) restoreWindow() {
-	slog.Info("[托盘] 恢复主窗口")
+	slog.Info("[tray] main window restored")
 	application.InvokeAsync(func() {
 		if t.quitting.Load() {
 			return
@@ -213,7 +213,7 @@ func (t *trayController) quit() {
 	if !t.quitting.CompareAndSwap(false, true) {
 		return
 	}
-	slog.Info("[托盘] 用户请求退出")
+	slog.Info("[tray] quit requested")
 	t.app.Quit()
 }
 
@@ -254,7 +254,12 @@ func (t *trayController) applyStatus(s configstore.TunnelStatus, connectedTunnel
 	} else {
 		t.tray.SetTemplateIcon(trayIconPNG)
 	}
-	slog.Info("[托盘] 状态更新", "state", s.State, "message", s.Message)
+	// 终端日志走英文通道（LogMessage：MessageEN/英文词典）；UI 标签仍双语
+	if msg := s.LogMessage(); msg != "" {
+		slog.Info("[tray] status updated", "state", s.State, "message", msg)
+	} else {
+		slog.Info("[tray] status updated", "state", s.State)
+	}
 }
 
 // applyLanguage 语言切换后刷新托盘静态文案与状态行：菜单项与状态文案随新语言，
@@ -264,7 +269,7 @@ func (t *trayController) applyLanguage() {
 		return
 	}
 	lang := i18n.Current()
-	slog.Info("[托盘] 语言切换，刷新菜单文案", "lang", lang)
+	slog.Info("[tray] language changed; refreshing menu labels", "lang", lang)
 	application.InvokeAsync(func() {
 		if t.quitting.Load() {
 			return

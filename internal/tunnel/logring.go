@@ -135,7 +135,7 @@ func (s *frpLogSink) enqueue(level, message string) {
 	case s.ch <- msg:
 	default:
 		dropped := s.dropped.Add(1)
-		fmt.Fprintf(os.Stderr, "[%s] [WARN] frp 日志队列已满，丢弃日志（累计 %d 条）\n",
+		fmt.Fprintf(os.Stderr, "[%s] [WARN] frp log queue is full; dropped logs (total %d)\n",
 			time.Now().Format("2006-01-02 15:04:05.000"), dropped)
 	}
 }
