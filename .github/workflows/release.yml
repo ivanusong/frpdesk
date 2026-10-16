@@ -24,6 +24,11 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 浅克隆会把 tag ref 解析到 commit，导致 annotated tag 被误判为轻量 tag。
+          # 发布流程需要完整 tag object 来读取版本说明。
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: 解析 tag 版本（唯一版本来源）
         # tag-only 发版：版本只从 annotated tag 解析，仓库内不再维护版本文件
