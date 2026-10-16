@@ -22,6 +22,8 @@ const state = {
   updateConfirming: false, // 确认弹窗期间防双击多弹窗
   updateApplying: false, // InstallUpdate RPC 挂起期间防重复触发（同步等待下载+重启，持续到真实完成）
   modalCtx: null, // 服务/配置模态打开上下文（语言切换时重算动态标题）
+  dragSort: null, // 卡片拖拽排序进行中上下文（非 null 时事件推送不重建列表，拖拽结束后统一补绘）
+  listRenderHoldUntil: 0, // 开关动画保护窗截止时间（拖拽另有 dragSort 状态，二者独立）
 };
 
 // 状态展示文案 key（稳定语义 key，渲染时按当前语言取词；未知状态原样展示）
@@ -44,6 +46,7 @@ const ICONS = {
   copy: '<svg class="icon" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>',
   qrCode: '<svg class="icon" viewBox="0 0 24 24"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>',
   trash: '<svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>',
+  gripVertical: '<svg class="icon" viewBox="0 0 24 24"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>',
   checkCircle: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
   alertCircle: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>',
   info: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
@@ -687,6 +690,9 @@ function renderServices(snapshot) {
     const qrBtn = publicUrl
       ? `<button class="btn btn-icon btn-ghost svc-op svc-op--r3" data-act="qr" data-url="${escAttr(publicUrl)}" title="${escAttr(t("action.showQr"))}" aria-label="${escAttr(t("action.showQr"))}">${ICONS.qrCode}</button>`
       : "";
+    // 排序把手（grip-vertical）：隐藏操作组最左（r4 波次位）；仅拖把手可排序，整卡不可拖。
+    // no-drag：禁止窗口拖拽区干扰（与标题栏 drag 语义解耦）
+    const dragBtn = `<button class="btn btn-icon btn-ghost svc-op svc-op--r4 svc-drag-handle no-drag" data-act="drag" title="${escAttr(t("action.reorder"))}" aria-label="${escAttr(t("action.reorder"))}">${ICONS.gripVertical}</button>`;
     const item = document.createElement("div");
     item.className = "service-item";
     item.dataset.id = svc.id;
@@ -706,6 +712,7 @@ function renderServices(snapshot) {
         </div>
       </div>
       <div class="service-ops">
+        ${dragBtn}
         ${qrBtn}
         ${copyBtn}
         <button class="btn btn-icon btn-ghost svc-op svc-op--r1" data-act="edit" title="${escAttr(t("action.edit"))}" aria-label="${escAttr(t("action.edit"))}">${ICONS.pencil}</button>
@@ -2306,6 +2313,7 @@ function bindEvents() {
   // 服务列表操作（事件委托）
   $("service-list").addEventListener("click", onServiceListClick);
   $("service-list").addEventListener("change", onServiceListToggle);
+  $("service-list").addEventListener("pointerdown", onServiceListPointerDown); // 拖拽排序（仅 handle）
 
   // Frps 配置列表操作（事件委托：启停/编辑/删除）
   $("server-list").addEventListener("click", onServerListClick);
@@ -2379,6 +2387,11 @@ function bindEvents() {
       JSON.parse(JSON.stringify(event.data ?? [])).map((x) => [x.serviceId, x]),
     );
     if (state.snapshot) {
+      // 拖拽排序进行中：只刷新底部状态，不重建列表（拖拽结束统一落定）
+      if (state.dragSort) {
+        renderStatus(state.snapshot.status);
+        return;
+      }
       // 开关动画保护窗（与 app:snapshot 同策略）：保护窗内轻量刷新并在窗口结束补绘
       if (Date.now() < (state.listRenderHoldUntil ?? 0)) {
         renderStatus(state.snapshot.status);
@@ -2391,6 +2404,15 @@ function bindEvents() {
   });
   window.wails.Events.On("app:snapshot", (event) => {
     const snap = JSON.parse(JSON.stringify(event.data));
+    // 拖拽排序进行中：只落地最新数据（含逐服务器状态），不重建列表（重绘会拔掉被拖卡）。
+    // 拖拽结束/回弹后由 applyConfigOnly 或补绘用当前快照重建，不丢任何一个事件。
+    if (state.dragSort) {
+      pruneMovedProxyStatus(state.snapshot?.config?.services, snap.config?.services);
+      state.snapshot = snap;
+      state.serverStatus = Object.fromEntries((snap.serverStatuses ?? []).map((x) => [x.serverId, x]));
+      renderStatus(state.snapshot.status);
+      return;
+    }
     // 开关动画保护窗（600ms）：SetServiceEnabled 触发的隧道重启会推送多次
     // app:snapshot（含 services 全量），整卡重绘会截断 switch 动画。
     // 窗内只做轻量更新（数据与逐服务器状态始终为最新），并在窗口结束时安排一次
@@ -2473,6 +2495,173 @@ function onServiceListToggle(e) {
       // 失败回弹：后端未变更，恢复用户点击前的视觉状态（error toast 由 run() 给出）
       toggle.checked = !toggle.checked;
     });
+}
+
+// ---------- 隧道卡片拖拽排序（仅把手可拖；持久化只是配置数组顺序变化，不触隧道生命周期）----------
+
+// 拖拽模型：被拖卡保持原 DOM 位（不移出文档流，避免列表重排跳变），用 transform
+// 跟手并提层（阴影+微缩放）；其余卡用 FLIP 等价的 transform + 过渡丝滑让位。
+// 松手换位时先物理重排 DOM（视觉无跳变），再调 ReorderServices 持久化；失败回弹原序。
+
+// onServiceListPointerDown：仅排序把手触发拖拽（整卡不可拖；单卡时无排序意义）
+function onServiceListPointerDown(e) {
+  if (e.button !== undefined && e.button !== 0) return; // 仅主键
+  const handle = e.target.closest(".svc-drag-handle");
+  if (!handle) return;
+  const list = $("service-list");
+  const item = handle.closest(".service-item");
+  const items = [...list.querySelectorAll(".service-item")];
+  if (!item || items.length < 2) return;
+  e.preventDefault(); // 阻止原生图片/文本拖拽与选择
+
+  const index = items.indexOf(item);
+  const homes = items.map((el) => el.offsetTop); // 同 offsetParent，相对位置可直接比较
+  state.dragSort = {
+    handle,
+    item,
+    items,
+    index,
+    homes,
+    height: item.offsetHeight,
+    pointerId: e.pointerId,
+    startClientY: e.clientY,
+    startScrollTop: list.scrollTop, // 列表初始滚动量：跟手位移的滚动补偿基准
+    dy: 0,
+    newIndex: index,
+  };
+  item.classList.add("is-dragging");
+  list.classList.add("is-sorting");
+  try {
+    handle.setPointerCapture?.(e.pointerId); // 指针移出窗口仍能收到 move/up
+  } catch {}
+  document.addEventListener("pointermove", onServiceDragMove);
+  document.addEventListener("pointerup", onServiceDragUp);
+  document.addEventListener("pointercancel", onServiceDragCancel);
+}
+
+// onServiceDragMove：跟手位移 + 目标位判定（越过邻卡中线即换位；被夹在列表首尾间）。
+// clientY 是视口坐标，列表滚动后卡片在视口中的原位置随之移动（offsetTop 布局坐标
+// 不变），因此跟手位移必须计入 scrollTop 变化量，否则卡片会脱离指针。
+function onServiceDragMove(e) {
+  const d = state.dragSort;
+  if (!d || e.pointerId !== d.pointerId) return;
+  const minDy = d.homes[0] - d.homes[d.index];
+  const maxDy = d.homes[d.items.length - 1] - d.homes[d.index];
+  const pointerDy = e.clientY - d.startClientY;
+  const scrollDy = ($("service-list").scrollTop ?? 0) - d.startScrollTop;
+  d.dy = Math.max(minDy, Math.min(maxDy, pointerDy + scrollDy));
+  d.item.style.transform = `translateY(${d.dy}px)`;
+  const center = d.homes[d.index] + d.height / 2 + d.dy;
+  let target = d.index;
+  if (d.dy > 0) {
+    for (let i = d.index + 1; i < d.items.length; i++) {
+      if (center < d.homes[i] + d.height / 2) break;
+      target = i;
+    }
+  } else if (d.dy < 0) {
+    for (let i = d.index - 1; i >= 0; i--) {
+      if (center > d.homes[i] + d.height / 2) break;
+      target = i;
+    }
+  }
+  if (target !== d.newIndex) {
+    d.newIndex = target;
+    applyServiceShifts(d);
+  }
+}
+
+// applyServiceShifts：让位动画。兄弟卡按「目标静态位 - 自身原位」位移一格，
+// 用真实 home 差（而非固定槽高）兼容不等高卡片；位移由 CSS 过渡提供平滑。
+function applyServiceShifts(d) {
+  for (let i = 0; i < d.items.length; i++) {
+    if (i === d.index) continue;
+    let shift = 0;
+    if (i > d.index && i <= d.newIndex) shift = d.homes[i - 1] - d.homes[i];
+    else if (i < d.index && i >= d.newIndex) shift = d.homes[i + 1] - d.homes[i];
+    d.items[i].style.transform = shift ? `translateY(${shift}px)` : "";
+  }
+}
+
+function onServiceDragUp(e) {
+  const d = state.dragSort;
+  if (!d || e.pointerId !== d.pointerId) return;
+  endServiceDrag(d);
+}
+
+// onServiceDragCancel：系统中断（触摸被系统手势接管等）→ 直接归位，不提交
+function onServiceDragCancel(e) {
+  const d = state.dragSort;
+  if (!d || e.pointerId !== d.pointerId) return;
+  detachServiceDrag(d);
+}
+
+// detachServiceDrag：拆除拖拽临时状态（监听/提层/让位位移），DOM 顺序不动
+function detachServiceDrag(d) {
+  state.dragSort = null;
+  document.removeEventListener("pointermove", onServiceDragMove);
+  document.removeEventListener("pointerup", onServiceDragUp);
+  document.removeEventListener("pointercancel", onServiceDragCancel);
+  d.item.classList.remove("is-dragging");
+  $("service-list").classList.remove("is-sorting");
+  for (const el of d.items) el.style.transform = "";
+}
+
+// endServiceDrag：松手落定。未换位直接归位；换位则先把 DOM 物理重排为新序（无跳变），
+// 再调后端持久化：成功用权威快照重绘；失败回弹到原序并提示（run() 已 toast）。
+async function endServiceDrag(d) {
+  const moved = d.newIndex !== d.index;
+  detachServiceDrag(d);
+  if (!moved) return;
+
+  const list = $("service-list");
+  const order = d.items.filter((_, i) => i !== d.index);
+  order.splice(d.newIndex, 0, d.item);
+  for (const el of order) list.appendChild(el); // 同步重排：已被过渡清零，无可见跳变
+  const ids = order.map((el) => el.dataset.id);
+  try {
+    const snapshot = await run("run.reorderServices", () => api.AppService.ReorderServices(ids));
+    applyConfigOnly(snapshot);
+    toast("success", t("toast.orderSaved"));
+  } catch {
+    // 保存失败：后端顺序未变，FLIP 回弹到原序；最终由当前快照重建保证状态一致
+    revertServiceOrder(d.items);
+  }
+}
+
+// revertServiceOrder：失败回弹。DOM 此刻已是新序：先无过渡把每张卡摆到「新序位置」
+// （即当前视觉位置不变），再把 DOM 物理回原序并过渡清零——从新序丝滑滑回原序。
+function revertServiceOrder(oldItems) {
+  const list = $("service-list");
+  const homes = oldItems.map((el) => el.offsetTop);
+  const newPos = new Map();
+  [...list.querySelectorAll(".service-item")].forEach((el, i) => newPos.set(el, i));
+  for (const [i, el] of oldItems.entries()) {
+    const j = newPos.get(el) ?? i;
+    el.style.transition = "none";
+    el.style.transform = j === i ? "" : `translateY(${homes[j] - homes[i]}px)`;
+  }
+  for (const el of oldItems) list.appendChild(el); // 物理回原序
+  void list.offsetWidth; // 提交初始态后再过渡清零
+  const ease = "cubic-bezier(0.77, 0, 0.175, 1)";
+  const dur = prefersReducedMotion() ? "0ms" : "220ms";
+  for (const el of oldItems) {
+    el.style.transition = `transform ${dur} ${ease}`;
+    el.style.transform = "";
+  }
+  setTimeout(() => {
+    for (const el of oldItems) el.style.transition = "";
+    if (state.dragSort) return; // 用户已开始下一次拖拽：不重建打断
+    if (state.snapshot) renderServices(state.snapshot);
+  }, 240);
+}
+
+// prefersReducedMotion：减少动效偏好（回弹时长降为 0，位置仍正确）
+function prefersReducedMotion() {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
 }
 
 // onServerListClick：Frps 卡片编辑/删除（删除由后端校验引用，含 disabled 服务，消息原样呈现）

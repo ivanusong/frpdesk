@@ -193,6 +193,7 @@ export const DICT = {
   "action.edit": { zh: "编辑", en: "Edit" },
   "action.delete": { zh: "删除", en: "Delete" },
   "action.toggleEnabled": { zh: "启用/停用", en: "Enable/disable" },
+  "action.reorder": { zh: "拖动调整顺序", en: "Drag to reorder" },
 
   // ---- Frps 配置卡片 ----
   "srv.noEnabledTunnels": { zh: "无已启用隧道", en: "No enabled tunnels" },
@@ -226,6 +227,7 @@ export const DICT = {
   "run.toggleService": { zh: "切换状态", en: "Toggle state" },
   "run.deleteConfig": { zh: "删除配置", en: "Delete configuration" },
   "run.testConn": { zh: "测试连接", en: "Test connection" },
+  "run.reorderServices": { zh: "保存排序", en: "Save order" },
 
   // ---- Toast ----
   "toast.copied": { zh: "地址已复制", en: "Address copied" },
@@ -236,6 +238,7 @@ export const DICT = {
   "toast.serviceUpdated": { zh: "服务已更新", en: "Tunnel updated" },
   "toast.serviceAdded": { zh: "服务已添加", en: "Tunnel added" },
   "toast.serviceDeleted": { zh: "服务已删除", en: "Tunnel deleted" },
+  "toast.orderSaved": { zh: "排序已保存", en: "Order saved" },
   "toast.logsCleared": { zh: "已清空日志显示", en: "Log display cleared" },
   "toast.probeOk": { zh: "FRPS 登录成功 · {0} ms", en: "FRPS login succeeded · {0} ms" },
   "toast.probeFail": { zh: "连接失败：{0}", en: "Connection failed: {0}" },

@@ -520,6 +520,74 @@ func TestServiceUnknownServerRejected(t *testing.T) {
 	}
 }
 
+// TestReorderServices 隧道拖拽排序：合法 ids 重排并落盘（新 Store 读回仍按新序，
+// 刷新/重启后保持）；缺 ID、多 ID、重复、未知 ID 一律拒绝且不落盘（无半更新）。
+func TestReorderServices(t *testing.T) {
+	s := newTestStore(t)
+	sa := mustCreateServer(t, s, testServerInput("a", "a.com", 7000, true))
+	s1 := mustCreate(t, s, ServiceInput{ServerID: sa.ID, Name: "w1", LocalPort: 8001, Subdomain: "web1", Enabled: true, Type: TypeHTTP})
+	s2 := mustCreate(t, s, ServiceInput{ServerID: sa.ID, Name: "w2", LocalPort: 8002, Subdomain: "web2", Enabled: true, Type: TypeHTTP})
+	s3 := mustCreate(t, s, ServiceInput{ServerID: sa.ID, Name: "w3", LocalPort: 8003, Subdomain: "web3", Enabled: false, Type: TypeHTTP})
+
+	want := []string{s3.ID, s1.ID, s2.ID}
+	cfg, err := s.ReorderServices(want)
+	if err != nil {
+		t.Fatalf("合法重排应成功: %v", err)
+	}
+	if got := idsOf(cfg.Services); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("应按给定次序重排: %v", got)
+	}
+	// 服务字段原样搬运（顺序之外的任何内容不得变化）
+	if cfg.Services[0].Name != "w3" || cfg.Services[0].Enabled || cfg.Services[0].Subdomain != "web3" {
+		t.Fatalf("重排不得改动服务字段: %+v", cfg.Services[0])
+	}
+
+	// 持久化：新 Store 读同路径仍为新序
+	reloaded := newStore(s.path)
+	if got := idsOf(reloaded.Config().Services); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("重排结果应落盘: %v", got)
+	}
+
+	before := idsOf(s.Config().Services)
+	// 缺 ID
+	if _, err := s.ReorderServices([]string{s1.ID, s2.ID}); err == nil {
+		t.Fatal("缺 ID 应拒绝")
+	}
+	// 多 ID
+	if _, err := s.ReorderServices([]string{s1.ID, s2.ID, s3.ID, s1.ID}); err == nil {
+		t.Fatal("多 ID 应拒绝")
+	}
+	// 重复 ID
+	if _, err := s.ReorderServices([]string{s1.ID, s1.ID, s3.ID}); err == nil {
+		t.Fatal("重复 ID 应拒绝")
+	}
+	// 未知 ID
+	if _, err := s.ReorderServices([]string{s1.ID, s2.ID, "ghost"}); err == nil {
+		t.Fatal("未知 ID 应拒绝")
+	}
+	// 失败不得产生半更新：内存顺序保持失败前状态
+	if got := idsOf(s.Config().Services); strings.Join(got, ",") != strings.Join(before, ",") {
+		t.Fatalf("失败重排不得改动顺序: %v", got)
+	}
+
+	// 原样顺序（no-op）与空配置空列表：允许
+	if _, err := s.ReorderServices(before); err != nil {
+		t.Fatalf("原样重排应成功: %v", err)
+	}
+	if _, err := newTestStore(t).ReorderServices(nil); err != nil {
+		t.Fatalf("空配置空排序应成功: %v", err)
+	}
+}
+
+// idsOf 提取服务 ID 序列（顺序断言用）。
+func idsOf(svcs []Service) []string {
+	out := make([]string, 0, len(svcs))
+	for _, svc := range svcs {
+		out = append(out, svc.ID)
+	}
+	return out
+}
+
 // TestTCPClearsSubdomainOnEdit TCP 编辑不参与子域名逻辑（置空）。
 func TestTCPClearsSubdomainOnEdit(t *testing.T) {
 	s := newTestStore(t)

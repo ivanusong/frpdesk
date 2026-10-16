@@ -945,7 +945,7 @@ html[data-no-mac] .titlebar {
 }
 
 /* 卡片操作组 hover 渐显：默认隐藏（占位不收布局），移入卡片时以删除按钮为锚、
-   从右往左展开——离锚越远起始偏移越大（r0 4px / r1 12px / r2 20px / r3 28px），
+   从右往左展开——离锚越远起始偏移越大（r0 4px / r1 12px / r2 20px / r3 28px / r4 36px），
    同一时间轴上远者行程长，无需时间错峰即呈波次感；离场各回各的偏移，原路镜像收回。
    仅精确指针设备启用（触屏无 hover 时常显）；focus-within 兜底键盘可达。
    用 translate 属性而非 transform，避免与 .btn:active 的 scale 按压互相覆盖。
@@ -975,6 +975,10 @@ html[data-no-mac] .titlebar {
     translate: 28px 0;
   }
 
+  .service-item .svc-op--r4 {
+    translate: 36px 0;
+  }
+
   .service-item:hover .svc-op,
   .service-item:focus-within .svc-op {
     opacity: 1;
@@ -986,6 +990,49 @@ html[data-no-mac] .titlebar {
      重建后的卡片在指针下会重放渐显动画，造成按钮反复闪烁；此处保持隐藏。
      不重置 translate：从开关移回卡片主体时原地淡入，不再重放展开。 */
   .service-item:has(.switch:hover) .svc-op {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+/* ===== 隧道卡片拖拽排序（仅把手可拖；排序只是配置数组顺序变化）===== */
+/* 排序把手：位于隐藏操作组最左（r4 波次位）；no-drag 已在标记层禁用窗口拖拽 */
+.svc-drag-handle {
+  --wails-draggable: no-drag;
+  cursor: grab;
+  touch-action: none; /* 触摸拖把手时不被滚动手势接管 */
+}
+
+.svc-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* 拖拽会话：提层的被拖卡跟随指针（内联 transform），其余卡 transform 让位并丝滑过渡 */
+#service-list.is-sorting {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#service-list.is-sorting .service-item {
+  position: relative;
+}
+
+#service-list.is-sorting .service-item:not(.is-dragging) {
+  transition: transform 220ms var(--ease-in-out);
+}
+
+.service-item.is-dragging {
+  z-index: 30;
+  background: var(--surface); /* 不透明底：让位卡片不透过被拖卡 */
+  /* 提层靠阴影/层级/背景表达，不用 scale：卡片外框宽度不变，
+     不会被 .service-list 的 overflow-x 横向裁剪（极窄窗口保留横向滚动） */
+  box-shadow: 0 14px 34px rgb(0 0 0 / 22%);
+}
+
+/* 拖拽期间其余卡片不重放 hover 渐显（指针扫过时按钮闪烁）。不重置 translate，
+   松开后悬停原卡仍是原地淡入，与既有语义一致 */
+@media (hover: hover) and (pointer: fine) {
+  #service-list.is-sorting .service-item:not(.is-dragging) .svc-op {
     opacity: 0;
     pointer-events: none;
   }
@@ -2347,6 +2394,11 @@ button.service-icon:focus-visible {
   .service-item .svc-op {
     translate: none;
     transition: opacity 260ms linear;
+  }
+
+  /* 拖拽排序：让位位移直接跳变（位置仍正确）；提层阴影为静态视觉强调，不属动效，保留 */
+  #service-list.is-sorting .service-item:not(.is-dragging) {
+    transition: none;
   }
 
   .update-chip.is-busy .icon,

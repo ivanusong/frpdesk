@@ -53,6 +53,8 @@ class El {
     this.scrollHeight = 0;
     this.offsetWidth = 0;
     this.offsetLeft = 0;
+    this.offsetTop = 0; // 拖拽排序几何断言用（测试显式赋值）
+    this.offsetHeight = 0;
   }
   get classList() {
     const self = this;
@@ -124,6 +126,11 @@ class El {
     delete this.attrs[k];
   }
   appendChild(el) {
+    // 真实 DOM 语义：已在子列表中的节点应先移除再追加（拖拽重排依赖此行为）
+    if (el.parent) {
+      const i = el.parent.children.indexOf(el);
+      if (i >= 0) el.parent.children.splice(i, 1);
+    }
     el.parent = this;
     this.children.push(el);
     return el;
@@ -200,6 +207,8 @@ class El {
   focus() {
     globalThis.__lastFocus = this;
   }
+  setPointerCapture() {} // 指针捕获无 UI 语义，桩中为空实现
+  releasePointerCapture() {}
   click() {
     if (this.disabled) return; // 真实浏览器语义：disabled 元素不派发 click
     this.dispatchEvent({ type: "click", bubbles: true });
@@ -436,6 +445,26 @@ const appStub = {
   CreateService: (...a) => Promise.resolve(appStub.record("CreateService", a) ?? currentSnapshot),
   UpdateService: (...a) => Promise.resolve(appStub.record("UpdateService", a) ?? currentSnapshot),
   DeleteService: (...a) => Promise.resolve(appStub.record("DeleteService", a) ?? currentSnapshot),
+  // 拖拽排序：模拟后端严格校验（数量/重复/未知 ID 拒绝）并按 ids 重排 currentSnapshot。
+  // appStub.results.ReorderServices = "reject" 可注入失败（验证回弹与提示）。
+  ReorderServices: (...a) => {
+    appStub.calls.push({ name: "ReorderServices", args: a });
+    if (appStub.results.ReorderServices === "reject") return Promise.reject(new Error("写入配置失败"));
+    const ids = a[0];
+    const snap = JSON.parse(JSON.stringify(currentSnapshot));
+    const byId = new Map(snap.config.services.map((s) => [s.id, s]));
+    if (
+      !Array.isArray(ids) ||
+      ids.length !== snap.config.services.length ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !byId.has(id))
+    ) {
+      return Promise.reject(new Error("排序请求与服务列表不一致"));
+    }
+    snap.config.services = ids.map((id) => byId.get(id));
+    currentSnapshot = snap;
+    return Promise.resolve(snap);
+  },
 
   CreateServer: (...a) => Promise.resolve(appStub.record("CreateServer", a) ?? currentSnapshot),
   UpdateServer: (...a) => Promise.resolve(appStub.record("UpdateServer", a) ?? currentSnapshot),
@@ -1309,11 +1338,208 @@ check(
 check("服务器卡无 hover 隐藏/translate 残留", !css.includes(".server-item .svc-op"));
 check("服务器卡底行落底（margin-top:auto）", /\.server-ops \{[^}]*margin-top: auto;/.test(css));
 
+// ---------- 场景 S12：隧道卡片拖拽排序（仅 handle 可拖；事件不重建；持久化/回弹） ----------
+// 三卡快照 + 手工几何（offsetTop 0/80/160，高 70，槽高 80），验证：
+// handle 位于隐藏操作组最左（QR/复制/编辑/删除之前且带 no-drag）、仅 handle 触发拖拽、
+// 让位 transform、拖拽期间 app:snapshot/app:proxies 不重建列表、松手按新序调 RPC、
+// 成功落地新序、失败 toast + 回弹原序、单卡不可拖。
+const sortSnap = makeSnapshot({
+  services: [
+    { id: "svc1", name: "博客", type: "http", subdomain: "blog", localHost: "127.0.0.1", localPort: 8080, remotePort: 0, enabled: true, serverId: "srvA", icon: "🌐" },
+    { id: "svc2", name: "SSH", type: "tcp", subdomain: "", localHost: "127.0.0.1", localPort: 22, remotePort: 36000, enabled: true, serverId: "srvA", icon: "🔌" },
+    { id: "svc3", name: "DNS", type: "udp", subdomain: "", localHost: "127.0.0.1", localPort: 53, remotePort: 36053, enabled: true, serverId: "srvA", icon: "📡" },
+  ],
+});
+currentSnapshot = sortSnap;
+await T.applySnapshot(sortSnap);
+const sortCards = () => [...document.querySelectorAll("#service-list .service-item")];
+const cardById = (id) => sortCards().find((c) => c.dataset.id === id);
+const setIdOrder = () => sortCards().map((c) => c.dataset.id).join();
+const geo = () => sortCards().forEach((el, i) => { el.offsetTop = i * 80; el.offsetHeight = 70; });
+geo();
+
+const firstOps = cardById("svc1").querySelector(".service-ops");
+const firstHandle = firstOps.firstChild;
+check(
+  "S12 排序把手在隐藏操作组最左（QR/复制/编辑/删除之前）",
+  firstHandle === cardById("svc1").querySelector(".svc-drag-handle") &&
+    firstOps.querySelector("button").dataset.act === "drag" &&
+    opsActs(firstOps).join(",") === "drag,qr,copy,edit,delete",
+  opsActs(firstOps).join(","),
+);
+check(
+  "S12 把手 title/aria 中/英双语 + no-drag（禁窗口拖拽）",
+  firstHandle.getAttribute("title") === "拖动调整顺序" &&
+    firstHandle.getAttribute("aria-label") === "拖动调整顺序" &&
+    firstHandle.classList.contains("no-drag") &&
+    firstHandle.classList.contains("svc-op--r4"),
+  `${firstHandle.getAttribute("title")} / ${firstHandle.className}`,
+);
+await T.setLanguagePref("en");
+check("S12 英文：把手 title 为 Drag to reorder", cardById("svc1")?.querySelector(".svc-drag-handle")?.getAttribute("title") === "Drag to reorder");
+await T.setLanguagePref("zh-CN");
+geo();
+
+// 整卡不可拖：卡片主体 pointerdown 不启动
+cardById("svc1").querySelector(".service-main").dispatchEvent({ type: "pointerdown", bubbles: true, pointerId: 5, clientY: 100, button: 0 });
+check("S12 整卡不可拖：卡片主体 pointerdown 不启动拖拽", T.state.dragSort === null && !document.getElementById("service-list").classList.contains("is-sorting"));
+
+// 仅把手可拖：与指针捕获后 move/up 均在 document 层接管
+const dragCard = cardById("svc1");
+const dragHandle = dragCard.querySelector(".svc-drag-handle");
+dragHandle.dispatchEvent({ type: "pointerdown", bubbles: true, pointerId: 7, clientY: 100, button: 0 });
+check(
+  "S12 拖拽开始：被拖卡提层/列表进入排序态",
+  dragCard.classList.contains("is-dragging") &&
+    document.getElementById("service-list").classList.contains("is-sorting") &&
+    T.state.dragSort?.index === 0 &&
+    T.state.dragSort?.pointerId === 7,
+  JSON.stringify(T.state.dragSort && { index: T.state.dragSort.index }),
+);
+dragHandle.dispatchEvent({ type: "pointermove", bubbles: true, pointerId: 7, clientY: 260 });
+check(
+  "S12 让位：被拖卡跟手 160px，后方两卡各上移 80px（targetIndex=2）",
+  dragCard.style.transform === "translateY(160px)" &&
+    cardById("svc2").style.transform === "translateY(-80px)" &&
+    cardById("svc3").style.transform === "translateY(-80px)" &&
+    T.state.dragSort?.newIndex === 2,
+  `${dragCard.style.transform} / ${cardById("svc2").style.transform} / ${cardById("svc3").style.transform}`,
+);
+check("S12 拖拽越界夹紧：拖到列表外仍不超出首尾格", (() => {
+  dragHandle.dispatchEvent({ type: "pointermove", bubbles: true, pointerId: 7, clientY: 9999 });
+  return dragCard.style.transform === "translateY(160px)";
+})(), dragCard.style.transform);
+
+// 滚动补偿：列表滚动会改变卡片在视口中的位置（clientY 是视口坐标，offsetTop 是
+// 布局坐标），跟手位移必须计入 scrollTop 变化量，否则卡片脱离指针、目标索引错位。
+// 覆盖向下滚与向上滚回两种（鼠标不动，仅改 scrollTop 后再 pointermove）。
+const sortList = document.getElementById("service-list");
+dragHandle.dispatchEvent({ type: "pointermove", bubbles: true, pointerId: 7, clientY: 180 });
+check("S12 滚动前基准：指针位移 80px → dy=80", dragCard.style.transform === "translateY(80px)", dragCard.style.transform);
+sortList.scrollTop = 40; // 向下滚 40（鼠标不动，clientY 仍 180）
+dragHandle.dispatchEvent({ type: "pointermove", bubbles: true, pointerId: 7, clientY: 180 });
+check(
+  "S12 滚动补偿（向下滚 40）：dy=80+40=120，目标位=1，让位与补偿后 dy 一致",
+  dragCard.style.transform === "translateY(120px)" &&
+    T.state.dragSort?.newIndex === 1 &&
+    cardById("svc2").style.transform === "translateY(-80px)" &&
+    cardById("svc3").style.transform === "",
+  `${dragCard.style.transform} / idx=${T.state.dragSort?.newIndex} / ${cardById("svc2").style.transform} / ${cardById("svc3").style.transform}`,
+);
+sortList.scrollTop = 0; // 向上滚回初始位置（鼠标仍不动）
+dragHandle.dispatchEvent({ type: "pointermove", bubbles: true, pointerId: 7, clientY: 180 });
+check(
+  "S12 滚动补偿（向上滚回 0）：dy=80+0=80，目标位=1",
+  dragCard.style.transform === "translateY(80px)" && T.state.dragSort?.newIndex === 1,
+  `${dragCard.style.transform} / idx=${T.state.dragSort?.newIndex}`,
+);
+dragHandle.dispatchEvent({ type: "pointermove", bubbles: true, pointerId: 7, clientY: 260 }); // 回到向下两格
+check(
+  "S12 恢复拖拽基准：dy=160、目标位=2（供后续提交断言）",
+  dragCard.style.transform === "translateY(160px)" && T.state.dragSort?.newIndex === 2,
+  `${dragCard.style.transform} / idx=${T.state.dragSort?.newIndex}`,
+);
+
+// 拖拽期间：app:snapshot / app:proxies 只静默落地数据，不得重建列表（重建会拔掉被拖卡）
+const boxedBefore = sortCards();
+const midSnap = JSON.parse(JSON.stringify(sortSnap));
+midSnap.status.state = "starting";
+wailsListeners["app:snapshot"][0]({ data: midSnap });
+wailsListeners["app:proxies"][0]({ data: [{ serviceId: "svc1", state: "registered" }] });
+check(
+  "S12 拖拽期间事件不重建列表（卡片元素身份不变、被拖卡仍在位）",
+  sortCards().every((el, i) => el === boxedBefore[i]) &&
+    dragCard.classList.contains("is-dragging") &&
+    T.state.dragSort !== null,
+);
+check(
+  "S12 拖拽期间数据静默落地（快照/proxy 事件不丢）",
+  T.state.snapshot.serverStatuses?.[0]?.serverId === "srvA" &&
+    T.state.proxyStatus.svc1?.state === "registered" &&
+    document.getElementById("status-label").textContent === "正在登录 frps",
+  `${T.state.proxyStatus.svc1?.state} / ${document.getElementById("status-label").textContent}`,
+);
+
+// 松手：物理重排 + 调 RPC（完整新序）+ 成功 toast
+const reorderCallsBefore = appStub.calls.filter((c) => c.name === "ReorderServices").length;
+dragHandle.dispatchEvent({ type: "pointerup", bubbles: true, pointerId: 7, clientY: 260 });
+await sleep(30);
+const reorderCall = appStub.calls.filter((c) => c.name === "ReorderServices").at(-1);
+check(
+  "S12 松手：ReorderServices 收到完整新序（svc2,svc3,svc1）",
+  appStub.calls.filter((c) => c.name === "ReorderServices").length === reorderCallsBefore + 1 &&
+    JSON.stringify(reorderCall?.args?.[0]) === JSON.stringify(["svc2", "svc3", "svc1"]),
+  JSON.stringify(reorderCall?.args?.[0]),
+);
+check(
+  "S12 成功落地：DOM/快照均新序，拖拽痕迹清理",
+  setIdOrder() === "svc2,svc3,svc1" &&
+    T.state.snapshot.config.services.map((s) => s.id).join() === "svc2,svc3,svc1" &&
+    T.state.dragSort === null &&
+    !document.getElementById("service-list").classList.contains("is-sorting") &&
+    sortCards().every((el) => !el.style.transform && !el.classList.contains("is-dragging")),
+  setIdOrder(),
+);
+check("S12 成功反馈：toast 排序已保存", lastToast().includes("排序已保存"), lastToast());
+check("S12 重绘后 proxy 注册徽章生效", cardById("svc1")?.querySelector(".tag-ok")?.textContent === "已注册");
+
+// 失败回弹：RPC 拒绝 → toast 提示 + DOM/快照回弹原序（无半更新状态）
+const failBefore = setIdOrder();
+geo();
+const failCard = cardById("svc2"); // 当前首卡
+const failHandle = failCard.querySelector(".svc-drag-handle");
+appStub.results.ReorderServices = "reject";
+failHandle.dispatchEvent({ type: "pointerdown", bubbles: true, pointerId: 8, clientY: 100, button: 0 });
+failHandle.dispatchEvent({ type: "pointermove", bubbles: true, pointerId: 8, clientY: 180 });
+failHandle.dispatchEvent({ type: "pointerup", bubbles: true, pointerId: 8, clientY: 180 });
+await sleep(320); // 越过 220ms 回弹过渡与 240ms 兑底重绘
+delete appStub.results.ReorderServices;
+check(
+  "S12 失败反馈：toast 为「保存排序失败：写入配置失败」",
+  lastToast().includes("保存排序失败") && lastToast().includes("写入配置失败"),
+  lastToast(),
+);
+check(
+  "S12 失败回弹：DOM 与快照均保持原序（无半更新）",
+  setIdOrder() === failBefore &&
+    T.state.snapshot.config.services.map((s) => s.id).join() === failBefore &&
+    T.state.dragSort === null &&
+    sortCards().every((el) => !el.style.transform),
+  `${setIdOrder()} / ${failBefore}`,
+);
+
+// 单卡：无排序意义，把手不启动拖拽
+const oneSnap = makeSnapshot({ services: [sortSnap.config.services[0]] });
+await T.applySnapshot(oneSnap);
+geo();
+document.querySelector("#service-list .svc-drag-handle")?.dispatchEvent({ type: "pointerdown", bubbles: true, pointerId: 9, clientY: 100, button: 0 });
+check("S12 单卡：把手不启动拖拽", T.state.dragSort === null && !document.getElementById("service-list").classList.contains("is-sorting"));
+
+// 拖拽排序样式：提层靠阴影/背景/层级，不得用 scale——被拖卡外框不得超出
+// .service-list 的 overflow-x 裁剪区（极窄窗口仍保留横向滚动）；reduced-motion
+// 只关让位过渡（提层阴影为静态视觉强调，保留），不得残留无效 scale 规则。
+const draggingBlocks = [...css.matchAll(/\.service-item\.is-dragging\s*\{[^}]*\}/g)].map((m) => m[0]);
+check(
+  "S12 CSS：拖拽提层（阴影/背景/层级）且不使用会被横向裁剪的 scale",
+  draggingBlocks.length > 0 &&
+    draggingBlocks.every((b) => /z-index:\s*30/.test(b) && b.includes("box-shadow") && b.includes("background") && !/scale\s*:/.test(b)),
+  draggingBlocks.map((b) => b.replace(/\s+/g, " ")).join(" | "),
+);
+check(
+  "S12 CSS：reduced-motion 关闭让位过渡且无 is-dragging 残留 scale 声明",
+  css.includes("  #service-list.is-sorting .service-item:not(.is-dragging) {\n    transition: none;\n  }") &&
+    draggingBlocks.every((b) => !/scale\s*:/.test(b)),
+);
+
 // ---------- 汇总 ----------
 console.log(`\n===== 行为验证汇总：${pass}/${pass + fail} 通过 =====`);
 process.exit(fail ? 1 : 0);
 
 // ---- helpers ----
+// opsActs：操作组内按钮 data-act 序列（断言排序把手在最左）
+function opsActs(ops) {
+  return [...ops.querySelectorAll("button[data-act]")].map((b) => b.dataset.act);
+}
 function srvHttp(base) {
   return { ...base, httpEnabled: true, baseDomain: "b.example.com", scheme: "https", publicPort: 8443 };
 }
