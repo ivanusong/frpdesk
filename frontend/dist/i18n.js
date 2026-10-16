@@ -5,7 +5,10 @@
 //   - 词典只收录「界面直接可见」的文案；FRP 原始错误、技术日志与历史 changelog
 //     保持原文（原始错误仍由后端 rawErr / 环形日志承载，便于排查）；
 //   - 用户名字、地址、服务名等技术数据不翻译；
-//   - 语言偏好三态：system（默认，中文系统→简体中文，其他→英文）/ zh-CN / en，
+//   - 运行日志（日志面板/更新/清理等后端环形日志）与诊断通道（FrontendLog）
+//     固定英文，不随界面语言翻译；
+//   - 语言：首启/无偏好由 system 自动解析系统语言（后端权威）；顶栏语言按钮是
+//     中/EN 两态显式切换（zh-CN ⇄ en），点击持久化显式偏好，不回到 system。
 //     持久化在 localStorage（旧 key frpcc.language 只读回退），并与后端
 //     config.json 的 language 字段保持一致（后端负责托盘/后端消息语言）。
 //
@@ -70,11 +73,10 @@ export const DICT = {
   "theme.light": { zh: "浅色", en: "Light" },
   "theme.dark": { zh: "深色", en: "Dark" },
   "theme.aria": { zh: "切换主题", en: "Switch theme" },
-  "lang.title": { zh: "语言：{0}", en: "Language: {0}" },
-  "lang.zh": { zh: "简体中文", en: "Chinese" },
-  "lang.en": { zh: "English", en: "English" },
-  "lang.systemResolved": { zh: "跟随系统（{0}）", en: "System ({0})" },
-  "lang.aria": { zh: "切换语言", en: "Switch language" },
+  // 语言按钮：显示当前生效语言（中/EN），点击切换到另一显式语言；
+  // 文案内直接写两语言名，不需要按语言再拆 key
+  "lang.title": { zh: "语言：中文，点击切换到 English", en: "Language: English, click to switch to 中文" },
+  "lang.aria": { zh: "切换语言：当前中文，点击切换到 English", en: "Switch language: English now, click to switch to 中文" },
   "lang.syncFail": { zh: "语言偏好未保存：{0}", en: "Language preference was not saved: {0}" },
 
   // ---- Tab 与工具行 ----
@@ -88,7 +90,7 @@ export const DICT = {
   "action.addServer": { zh: "新增 Frps", en: "Add Frps" },
   "log.autoscroll": { zh: "自动滚动", en: "Auto-scroll" },
   "log.clear": { zh: "清空显示", en: "Clear display" },
-  "log.system": { zh: "系统", en: "System" },
+  // 日志面板公共归属固定为 System（不随界面语言翻译；不进词典）
 
   // ---- 空态 ----
   "empty.services": { zh: "还没有穿透服务，点右上角「新增」。", en: "No tunnels yet. Click \"Add\" in the top-right corner." },
@@ -377,7 +379,19 @@ export function t(key, ...args) {
   if (!entry) return String(key);
   // 词典字段名固定为 zh/en（比语言标签紧凑）；此处做一次映射
   const field = lang === PREF_ZH ? "zh" : "en";
-  const text = entry[field] ?? entry.en ?? entry.zh ?? String(key);
+  return interpolate(entry[field] ?? entry.en ?? entry.zh ?? String(key), args);
+}
+
+// tEn(key, ...args)：固定英文取词（诊断日志通道专用）。与 t() 同插值规则，
+// 但恒用 en 文案：进入后端日志的文本不随界面语言变化（toast 等可见 UI 仍走 t()）。
+export function tEn(key, ...args) {
+  const entry = DICT[key];
+  if (!entry) return t(key, ...args);
+  return interpolate(entry.en ?? entry.zh ?? String(key), args);
+}
+
+// interpolate {0}..{n} 插值：单次扫描，参数内容不递归替换。
+function interpolate(text, args) {
   if (!args.length) return text;
   return text.replace(/\{([0-9])\}/g, (m, d) => (Number(d) < args.length ? String(args[Number(d)]) : m));
 }

@@ -152,6 +152,7 @@ func (m *Manager) Logs() []configstore.LogEntry {
 
 // AppendLog 写入应用级日志（与实例状态机无关，如更新流程）。
 // 只追加日志，不推进任何实例状态机；统一带 [frpdesk] 前缀，与 frp 库原生日志区分。
+// 消息本体约定固定英文（不随界面语言翻译；状态/错误等 UI 文案仍走 i18n 双语）。
 func (m *Manager) AppendLog(level, message string) {
 	entries := m.ring.Append(level, "[frpdesk] "+message)
 	if m.OnLogs != nil {
@@ -184,7 +185,7 @@ func (m *Manager) Reconcile(server configstore.ServerConfig, svcs []configstore.
 			if st := m.statuses[server.ID]; st.State == configstore.StateFailed {
 				m.statuses[server.ID] = configstore.ServerStatus{ServerID: server.ID, State: configstore.StateStopped}
 				var notes []notify
-				m.logLocked(&notes, "info", "该服务器已无启用的隧道，失败状态已清理", server.ID)
+				m.logLocked(&notes, "info", "No enabled tunnels on this server; failed state cleared", server.ID)
 				m.mu.Unlock()
 				m.flush(notes)
 				return
@@ -193,7 +194,7 @@ func (m *Manager) Reconcile(server configstore.ServerConfig, svcs []configstore.
 			return // 无实例且无隧道：no-op
 		}
 		var notes []notify
-		m.logLocked(&notes, "info", "该服务器已无启用的隧道，停止连接", server.ID)
+		m.logLocked(&notes, "info", "No enabled tunnels on this server; disconnecting", server.ID)
 		m.stopInstanceLocked(&notes, inst)
 		m.mu.Unlock()
 		m.flush(notes)
@@ -202,10 +203,12 @@ func (m *Manager) Reconcile(server configstore.ServerConfig, svcs []configstore.
 	}
 
 	// 期望连接：配置校验（非法则记录原因不启动；修正配置后再次 reconcile 即可启动）
-	if msg := configstore.ValidateServerStart(server, svcs); msg != "" {
-		m.statuses[server.ID] = configstore.ServerStatus{ServerID: server.ID, State: configstore.StateStopped, Message: msg}
+	// 状态消息按当前语言（UI 双语）；日志本体固定英文（key+args 经 TL(EN) 重渲染）
+	if msg, key, args := configstore.ValidateServerStartKeyed(server, svcs); msg != "" {
+		m.statuses[server.ID] = configstore.ServerStatus{ServerID: server.ID, State: configstore.StateStopped,
+			Message: msg, MessageEN: i18n.TLEn(key, args...)}
 		var notes []notify
-		m.logLocked(&notes, "info", msg, "")
+		m.logLocked(&notes, "info", i18n.TL(i18n.EN, key, args...), "")
 		m.mu.Unlock()
 		m.flush(notes)
 		return
@@ -216,7 +219,7 @@ func (m *Manager) Reconcile(server configstore.ServerConfig, svcs []configstore.
 	if inst != nil && connectionChanged(inst.server, server) {
 		var notes []notify
 		m.logLocked(&notes, "info",
-			fmt.Sprintf("服务器连接参数变化，重连 frps %s:%d", server.ServerAddr, server.ServerPort), server.ID)
+			fmt.Sprintf("Server connection settings changed; reconnecting to frps %s:%d", server.ServerAddr, server.ServerPort), server.ID)
 		st := m.restartLocked(&notes, server, enabled)
 		m.mu.Unlock()
 		m.flush(notes)
@@ -232,7 +235,7 @@ func (m *Manager) Reconcile(server configstore.ServerConfig, svcs []configstore.
 	// 都是当次期望，不存在复活旧配置。
 	if inst != nil && inst.state == configstore.StateStopping {
 		var notes []notify
-		m.logLocked(&notes, "info", "服务器停止中，直接按最新配置重新连接", server.ID)
+		m.logLocked(&notes, "info", "Server still stopping; reconnecting with the latest configuration", server.ID)
 		st := m.restartLocked(&notes, server, enabled)
 		m.mu.Unlock()
 		m.flush(notes)
@@ -245,7 +248,7 @@ func (m *Manager) Reconcile(server configstore.ServerConfig, svcs []configstore.
 	if inst != nil && inst.state == configstore.StateStarting {
 		inst.pending = &pendingApply{server: server, svcs: enabled}
 		var notes []notify
-		m.logLocked(&notes, "info", "服务器登录中，配置变更将在连接后应用", server.ID)
+		m.logLocked(&notes, "info", "Server is logging in; configuration changes will apply after connection", server.ID)
 		m.mu.Unlock()
 		m.flush(notes)
 		return
@@ -261,7 +264,7 @@ func (m *Manager) Reconcile(server configstore.ServerConfig, svcs []configstore.
 	// 无实例 → 自动启动
 	var notes []notify
 	m.logLocked(&notes, "info",
-		fmt.Sprintf("正在连接 frps %s:%d（%s，启用 %d 个代理）",
+		fmt.Sprintf("Connecting to frps %s:%d (%s; %d tunnel(s) enabled)",
 			server.ServerAddr, server.ServerPort, server.Name, len(enabled)), server.ID)
 	st := m.restartLocked(&notes, server, enabled)
 	m.mu.Unlock()
@@ -279,7 +282,7 @@ func (m *Manager) waitInstanceDone(inst *serverInstance) {
 	select {
 	case <-inst.done:
 	case <-time.After(stopWaitTimeout):
-		slog.Warn("[Stop] 等待实例收尾超时", "server", name, "id", id)
+		slog.Warn("[stop] timed out waiting for instance shutdown", "server", name, "id", id)
 	}
 }
 
@@ -299,13 +302,15 @@ func (m *Manager) restartLocked(notes *[]notify, server configstore.ServerConfig
 	if old := m.insts[server.ID]; old != nil {
 		m.stopInstanceLocked(notes, old)
 	}
-	st := configstore.ServerStatus{ServerID: server.ID, State: configstore.StateStarting, Message: i18n.T("msg.loggingIn"), MessageKey: "msg.loggingIn"}
+	st := configstore.ServerStatus{ServerID: server.ID, State: configstore.StateStarting, Message: i18n.T("msg.loggingIn"), MessageEN: i18n.TLEn("msg.loggingIn"), MessageKey: "msg.loggingIn"}
 	m.statuses[server.ID] = st
 	if err := m.launchLocked(notes, server, enabled); err != nil {
 		st = configstore.ServerStatus{ServerID: server.ID, State: configstore.StateFailed,
-			Message: configstore.BriefMessage(err.Error(), 120)}
+			Message:   configstore.BriefMessage(err.Error(), 120),
+			MessageEN: configstore.BriefMessage(i18n.ErrText(err), 120)}
 		m.statuses[server.ID] = st
-		m.logLocked(notes, "error", err.Error(), server.ID)
+		// 日志本体固定英文：双语错误取英文渲染，其余（FRP/OS 原始错误）保持原文
+		m.logLocked(notes, "error", i18n.ErrText(err), server.ID)
 	}
 	return st
 }
@@ -316,7 +321,7 @@ func (m *Manager) forceRestart(server configstore.ServerConfig, svcs []configsto
 	enabled := enabledServices(svcs, server.ID)
 	m.mu.Lock()
 	var notes []notify
-	m.logLocked(&notes, "info", "热更新失败，强制重连该服务器", server.ID)
+	m.logLocked(&notes, "info", "Hot reload failed; force-reconnecting this server", server.ID)
 	st := m.restartLocked(&notes, server, enabled)
 	m.mu.Unlock()
 	m.flush(notes)
@@ -410,7 +415,8 @@ func (m *Manager) launchLocked(notes *[]notify, server configstore.ServerConfig,
 		defer close(inst.done)
 		defer func() {
 			if r := recover(); r != nil {
-				m.finishRun(inst, fmt.Errorf("%s", i18n.T("msg.frpcPanicHit", r)))
+				// 双语错误：finishRun 里 UI 消息按当前语言、日志经 ErrText 固定英文
+				m.finishRun(inst, i18n.LErr("msg.frpcPanicHit", r))
 			}
 		}()
 		m.finishRun(inst, svc.Run(ctx))
@@ -430,8 +436,11 @@ func serviceIDs(svcs []configstore.Service) []string {
 // stopInstanceLocked 停止单实例：置过渡态并取消 Run（收尾 goroutine 写终态）。
 // 必须持有 m.mu。
 func (m *Manager) stopInstanceLocked(notes *[]notify, inst *serverInstance) {
-	m.transitionLocked(notes, inst, configstore.TunnelStatus{State: configstore.StateStopping, Message: i18n.T("msg.stopping"), MessageKey: "msg.stopping"})
-	m.logLocked(notes, "info", "正在停止 frpc", inst.server.ID)
+	m.transitionLocked(notes, inst, configstore.TunnelStatus{
+		State:   configstore.StateStopping,
+		Message: i18n.T("msg.stopping"), MessageEN: i18n.TLEn("msg.stopping"), MessageKey: "msg.stopping",
+	})
+	m.logLocked(notes, "info", "Stopping frpc", inst.server.ID)
 	inst.cancel()
 	inst.releaseProxies() // 立即释放本实例代理；Run 收尾时幂等再释放一次
 }
@@ -461,6 +470,7 @@ func (m *Manager) sampleInstance(inst *serverInstance) {
 			m.transitionLocked(&notes, inst, configstore.TunnelStatus{
 				State:      configstore.StateRunning,
 				Message:    i18n.T("msg.connected"),
+				MessageEN:  i18n.TLEn("msg.connected"),
 				MessageKey: "msg.connected",
 				StartedAt:  time.Now().Format(time.RFC3339),
 			})
@@ -472,6 +482,7 @@ func (m *Manager) sampleInstance(inst *serverInstance) {
 			m.transitionLocked(&notes, inst, configstore.TunnelStatus{
 				State:      configstore.StateStarting,
 				Message:    i18n.T("msg.reconnecting"),
+				MessageEN:  i18n.TLEn("msg.reconnecting"),
 				MessageKey: "msg.reconnecting",
 			})
 		}
@@ -491,7 +502,7 @@ func (m *Manager) sampleInstance(inst *serverInstance) {
 	inst.pending = nil
 	m.mu.Unlock()
 	if pending != nil {
-		slog.Info("[frpdesk] 登录期间有配置变更，连接后补应用", "server", pending.server.Name)
+		slog.Info("[frpdesk] configuration changed while logging in; applying after connection", "server", pending.server.Name)
 		m.applyProxies(inst, pending.server, pending.svcs)
 	}
 }
@@ -585,13 +596,13 @@ func (m *Manager) applyProxies(inst *serverInstance, server configstore.ServerCo
 		inst.ids = serviceIDs(enabled)
 		inst.svcs = enabled
 		inst.server = server
-		m.logLocked(&notes, "info", fmt.Sprintf("配置已热更新（%d 个代理）", len(enabled)), server.ID)
+		m.logLocked(&notes, "info", fmt.Sprintf("Configuration hot-reloaded (%d tunnel(s))", len(enabled)), server.ID)
 	}
 	m.mu.Unlock()
 	if current {
 		m.flush(notes)
 	} else {
-		slog.Info("[frpdesk] 配置热更新完成，但实例已被替换，丢弃本次结果", "server", server.Name)
+		slog.Info("[frpdesk] hot reload completed but instance was replaced; discarding the result", "server", server.Name)
 	}
 }
 
@@ -603,15 +614,15 @@ func (m *Manager) hotApplyFailed(inst *serverInstance, server configstore.Server
 	current := m.insts[inst.server.ID] == inst && inst.state == configstore.StateRunning
 	var notes []notify
 	if current {
-		m.logLocked(&notes, "error", fmt.Sprintf("配置热更新失败，回退重启该服务器：%v", err), inst.server.ID)
+		m.logLocked(&notes, "error", fmt.Sprintf("Hot reload failed; restarting this server: %v", i18n.ErrText(err)), inst.server.ID)
 	}
 	m.mu.Unlock()
 	if !current {
-		slog.Error("[frpdesk] 配置热更新失败（实例已变更，跳过回退）", "server", server.Name, "err", err)
+		slog.Error("[frpdesk] hot reload failed (instance replaced; skipping fallback restart)", "server", server.Name, "err", i18n.ErrText(err))
 		return
 	}
 	m.flush(notes)
-	slog.Error("[frpdesk] 配置热更新失败，回退重启该服务器", "server", server.Name, "err", err)
+	slog.Error("[frpdesk] hot reload failed; restarting this server", "server", server.Name, "err", i18n.ErrText(err))
 	m.forceRestart(server, enabled)
 }
 
@@ -626,7 +637,7 @@ func (m *Manager) finishRun(inst *serverInstance, err error) {
 	m.mu.Lock()
 	var notes []notify
 	if cur := m.insts[inst.server.ID]; cur != nil && cur != inst {
-		m.logLocked(&notes, "info", "旧 frpc 实例已退出（已被新实例替换）", inst.server.ID)
+		m.logLocked(&notes, "info", "Old frpc instance exited (replaced by a new instance)", inst.server.ID)
 		m.mu.Unlock()
 		m.flush(notes)
 		return
@@ -638,14 +649,22 @@ func (m *Manager) finishRun(inst *serverInstance, err error) {
 	switch {
 	case err == nil:
 		// 正常退出：无条件写终态（不可加 state!=stopped 守卫——过渡态也是 stopped）
-		m.transitionLocked(&notes, inst, configstore.TunnelStatus{State: configstore.StateStopped, Message: i18n.T("msg.stopped"), MessageKey: "msg.stopped"})
+		m.transitionLocked(&notes, inst, configstore.TunnelStatus{
+			State:   configstore.StateStopped,
+			Message: i18n.T("msg.stopped"), MessageEN: i18n.TLEn("msg.stopped"), MessageKey: "msg.stopped",
+		})
 	case inst.state == configstore.StateStopping || inst.state == configstore.StateStopped:
 		// 主动停止/取消过程中 cancel 后 Run 返回 error 的偶发路径：终态统一「frpc 已停止」
-		m.transitionLocked(&notes, inst, configstore.TunnelStatus{State: configstore.StateStopped, Message: i18n.T("msg.stopped"), MessageKey: "msg.stopped"})
+		m.transitionLocked(&notes, inst, configstore.TunnelStatus{
+			State:   configstore.StateStopped,
+			Message: i18n.T("msg.stopped"), MessageEN: i18n.TLEn("msg.stopped"), MessageKey: "msg.stopped",
+		})
 	default:
 		m.transitionLocked(&notes, inst, configstore.TunnelStatus{
-			State:   configstore.StateFailed,
-			Message: configstore.BriefMessage(i18n.T("msg.frpcPanic", err), 120),
+			State: configstore.StateFailed,
+			// UI 消息按当前语言；日志走 MessageEN（固定英文，错误详情经 ErrText）
+			Message:   configstore.BriefMessage(i18n.T("msg.frpcPanic", err), 120),
+			MessageEN: configstore.BriefMessage(i18n.TLEn("msg.frpcPanic", i18n.ErrText(err)), 120),
 		})
 	}
 	m.mu.Unlock()
@@ -653,11 +672,14 @@ func (m *Manager) finishRun(inst *serverInstance, err error) {
 }
 
 // transitionLocked 更新实例状态与服务器状态记录并登记通知（必须持有 m.mu）。
+// 终端日志的 message 字段走 LogMessage()（固定英文）；UI 消息（ts.Message）仍双语。
 func (m *Manager) transitionLocked(notes *[]notify, inst *serverInstance, ts configstore.TunnelStatus) configstore.TunnelStatus {
-	slog.Info("[状态机]", "server", inst.server.Name, "id", inst.server.ID, "state", ts.State, "message", ts.Message, "prev", inst.state)
+	slog.Info("[state] instance transition", "server", inst.server.Name, "id", inst.server.ID,
+		"state", ts.State, "message", ts.LogMessage(), "prev", inst.state)
 	inst.state = ts.State
 	inst.message = ts.Message
-	st := configstore.ServerStatus{ServerID: inst.server.ID, State: ts.State, Message: ts.Message, MessageKey: ts.MessageKey, StartedAt: ts.StartedAt}
+	st := configstore.ServerStatus{ServerID: inst.server.ID, State: ts.State,
+		Message: ts.Message, MessageEN: ts.MessageEN, MessageKey: ts.MessageKey, StartedAt: ts.StartedAt}
 	m.statuses[inst.server.ID] = st
 	*notes = append(*notes, notify{status: true})
 	return ts
@@ -688,13 +710,13 @@ func (m *Manager) RefreshLocalizedMessages() {
 	if len(notes) == 0 {
 		return
 	}
-	slog.Info("[i18n] 状态说明文案已按新语言重建", "count", len(notes), "lang", i18n.Current())
+	slog.Info("[i18n] localized status messages rebuilt", "count", len(notes), "lang", i18n.Current())
 	m.flush(notes)
 }
 
 // logLocked 写入环形缓冲并登记日志通知。
 // serverID 非空时条目标注归属（实例生命周期日志）；空 = 全局/无法归属（frp 原生日志流）。
-// 自身日志统一带 [frpdesk] 前缀。
+// 自身日志统一带 [frpdesk] 前缀；消息本体约定固定英文（守卫见根目录 log_language_test.go）。
 func (m *Manager) logLocked(notes *[]notify, level, message, serverID string) {
 	entry := "[frpdesk] " + message
 	var entries []configstore.LogEntry
@@ -793,10 +815,10 @@ func buildProxyCfgs(svcs []configstore.Service, proxies *corsProxySet) ([]v1.Pro
 			if proxies.get(svc.ID) == nil {
 				p, err := newCORSProxy(proxies, svc.LocalHost, svc.LocalPort, svc.ID)
 				if err != nil {
-					return nil, fmt.Errorf("%s: %w", i18n.T("err.svcProxyFail", svc.Name), err)
+					return nil, i18n.LErrWrap("err.svcProxyFail", err, svc.Name)
 				}
 				proxies.add(svc.ID, p)
-				slog.Info("[代理] HTTP 服务已接入本地代理（内置跨域+本地 Host）",
+				slog.Info("[proxy] HTTP tunnel attached to local proxy (built-in CORS + Host rewrite)",
 					"server", proxies.serverID, "service", svc.Name, "id", svc.ID, "listen", p.addr(), "target", p.target)
 			}
 			localHost, localPort := proxies.localAddr(svc)
@@ -821,7 +843,7 @@ func buildFrpcService(server configstore.ServerConfig, enabled []configstore.Ser
 
 	configSource := source.NewConfigSource()
 	if err := configSource.ReplaceAll(proxyCfgs, nil); err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("err.registerProxyFail"), err)
+		return nil, i18n.LErrWrap("err.registerProxyFail", err)
 	}
 	aggregator := source.NewAggregator(configSource)
 
@@ -830,7 +852,7 @@ func buildFrpcService(server configstore.ServerConfig, enabled []configstore.Ser
 		ConfigSourceAggregator: aggregator,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("err.createFrpcFail"), err)
+		return nil, i18n.LErrWrap("err.createFrpcFail", err)
 	}
 	return svc, nil
 }

@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +107,9 @@ const (
 type TunnelStatus struct {
 	State   TunnelState `json:"state"`
 	Message string      `json:"message,omitempty"`
+	// MessageEN 该状态消息的英文渲染（终端诊断日志通道用，不随界面语言；
+	// JSON 不输出）。UI 展示仍用 Message（双语），两者在创建点成对生成。
+	MessageEN string `json:"-"`
 	// MessageKey 「状态说明类」消息的 i18n key（如 msg.connected）：语言切换后可按
 	// 当前语言重渲染；错误详情不设 key，保留发生时的原文（含 FRP 原始错误）。
 	MessageKey string `json:"messageKey,omitempty"`
@@ -127,9 +129,34 @@ type ServerStatus struct {
 	ServerID string      `json:"serverId"`
 	State    TunnelState `json:"state"`
 	Message  string      `json:"message,omitempty"`
+	// MessageEN 同 TunnelStatus.MessageEN：英文渲染（日志通道，JSON 不输出）
+	MessageEN string `json:"-"`
 	// MessageKey 同 TunnelStatus：可重渲染的状态说明 key（错误详情为空）
 	MessageKey string `json:"messageKey,omitempty"`
 	StartedAt  string `json:"startedAt,omitempty"`
+}
+
+// LogMessage 返回该状态用于终端诊断日志的英文消息（固定英文，不随界面语言）：
+// 优先 MessageEN（错误详情等无 key 场景在创建点算好的英文），
+// 其次按 MessageKey 取英文词典文案；两者皆空返回空串。UI 展示仍用 Message（双语）。
+func (s TunnelStatus) LogMessage() string {
+	return statusLogMessage(s.MessageEN, s.MessageKey)
+}
+
+// LogMessage 同 TunnelStatus.LogMessage：失败原因等服务器级状态的日志英文渲染。
+func (s ServerStatus) LogMessage() string {
+	return statusLogMessage(s.MessageEN, s.MessageKey)
+}
+
+// statusLogMessage 日志英文消息渲染共用实现（MessageEN 优先，MessageKey 回退）。
+func statusLogMessage(messageEN, messageKey string) string {
+	if messageEN != "" {
+		return messageEN
+	}
+	if messageKey != "" {
+		return i18n.TLEn(messageKey)
+	}
+	return ""
 }
 
 // LogEntry 单条日志。能准确归属实例的条目带 ServerID/ServerName；
@@ -191,12 +218,26 @@ func (c Config) EnabledCount(serverID string) int {
 }
 
 // AggregateStatus 由各服务器状态派生全局聚合状态（纯函数，单测覆盖）。
-// 规则（与前端冻结）：totalCount 为有 enabled 隧道的服务器数（调用方按配置计算传入）；
+// 消息按当前语言渲染（状态栏/托盘 UI 用）；规则（与前端冻结）：totalCount 为有
+// enabled 隧道的服务器数（调用方按配置计算传入）；
 // 存在 starting → starting（登录中优先展示）；存在 stopping → stopping；
 // active 全为 running（无 starting/stopping，允许夹杂 failed）→ running（部分失败不阻塞）；
 // 无 active 但有 failed → failed；否则 stopped。
 // startedAt 取最早一台 running 的连接时刻。
 func AggregateStatus(statuses []ServerStatus, totalCount int) TunnelStatus {
+	return aggregateStatus(statuses, totalCount, i18n.T, func(s ServerStatus) string { return s.Message })
+}
+
+// AggregateStatusEN 聚合状态的英文渲染（终端诊断日志通道用，不随界面语言；
+// Message 字段填英文，UI 不得使用）。失败原因取各状态的 LogMessage()
+// （MessageEN/英文词典，严格英文通道；FRP 原始错误类状态本就英文）。
+func AggregateStatusEN(statuses []ServerStatus, totalCount int) TunnelStatus {
+	return aggregateStatus(statuses, totalCount, i18n.TLEn, func(s ServerStatus) string { return s.LogMessage() })
+}
+
+// aggregateStatus 聚合实现：tr 选渲染语言，reasonOf 选失败原因来源
+// （本地化 Message 或英文 MessageEN），两通道共用同一套状态归并规则。
+func aggregateStatus(statuses []ServerStatus, totalCount int, tr func(string, ...any) string, reasonOf func(ServerStatus) string) TunnelStatus {
 	agg := TunnelStatus{TotalCount: totalCount}
 	var started []time.Time
 	for _, s := range statuses {
@@ -249,10 +290,10 @@ func AggregateStatus(statuses []ServerStatus, totalCount int) TunnelStatus {
 	}
 	// 失败摘要：不遮蔽主态，附一条可读消息（托盘/状态栏提示用，随语言变化）
 	if agg.FailedCount > 0 {
-		msg := i18n.T("msg.serversFailed", agg.FailedCount)
+		msg := tr("msg.serversFailed", agg.FailedCount)
 		for _, s := range statuses {
-			if s.State == StateFailed && s.Message != "" {
-				msg = i18n.T("msg.serversFailedReason", agg.FailedCount, BriefMessage(s.Message, 80))
+			if s.State == StateFailed && reasonOf(s) != "" {
+				msg = tr("msg.serversFailedReason", agg.FailedCount, BriefMessage(reasonOf(s), 80))
 				break
 			}
 		}
@@ -284,7 +325,7 @@ func userConfigPath() (string, error) {
 func appConfigPath(dirName string) (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", i18n.T("err.userConfigDir"), err)
+		return "", i18n.LErrWrap("err.userConfigDir", err)
 	}
 	return filepath.Join(dir, dirName, configFileName), nil
 }
@@ -314,20 +355,20 @@ func copyLegacyConfigIfNeeded(newPath, legacyPath string) (bool, error) {
 	if _, err := os.Stat(newPath); err == nil {
 		return false, nil
 	} else if !os.IsNotExist(err) {
-		return false, fmt.Errorf("%s: %w", i18n.T("err.statConfig"), err)
+		return false, i18n.LErrWrap("err.statConfig", err)
 	}
 	if _, err := os.Stat(legacyPath); os.IsNotExist(err) {
 		return false, nil
 	} else if err != nil {
-		return false, fmt.Errorf("%s: %w", i18n.T("err.statLegacy"), err)
+		return false, i18n.LErrWrap("err.statLegacy", err)
 	}
 
 	raw, err := os.ReadFile(legacyPath)
 	if err != nil {
-		return false, fmt.Errorf("%s: %w", i18n.T("err.readLegacy"), err)
+		return false, i18n.LErrWrap("err.readLegacy", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
-		return false, fmt.Errorf("%s: %w", i18n.T("err.configDir"), err)
+		return false, i18n.LErrWrap("err.configDir", err)
 	}
 
 	// O_EXCL：并发/重复启动时绝不覆盖已生成的新配置
@@ -336,16 +377,16 @@ func copyLegacyConfigIfNeeded(newPath, legacyPath string) (bool, error) {
 		if os.IsExist(err) {
 			return false, nil // 竞争下已有新配置：按「新配置优先」继续
 		}
-		return false, fmt.Errorf("%s: %w", i18n.T("err.createLegacyCopy"), err)
+		return false, i18n.LErrWrap("err.createLegacyCopy", err)
 	}
 	if _, err := f.Write(raw); err != nil {
 		f.Close()
 		_ = os.Remove(newPath) // 不留下写了一半的配置
-		return false, fmt.Errorf("%s: %w", i18n.T("err.writeConfig"), err)
+		return false, i18n.LErrWrap("err.writeConfig", err)
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(newPath)
-		return false, fmt.Errorf("%s: %w", i18n.T("err.writeConfig"), err)
+		return false, i18n.LErrWrap("err.writeConfig", err)
 	}
 	return true, nil
 }
@@ -510,11 +551,11 @@ func normalizeScheme(scheme string) string {
 
 func (s *Store) save() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("%s: %w", i18n.T("err.configDir"), err)
+		return i18n.LErrWrap("err.configDir", err)
 	}
 	raw, err := json.MarshalIndent(s.cfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("%s: %w", i18n.T("err.marshalConfig"), err)
+		return i18n.LErrWrap("err.marshalConfig", err)
 	}
 	return os.WriteFile(s.path, append(raw, '\n'), 0o644)
 }
@@ -576,17 +617,17 @@ func itoa(n int) string { return fmt.Sprintf("%d", n) }
 func buildServer(input ServerInput, existing []ServerConfig, excludeID string) (ServerConfig, error) {
 	name := trimSpace(input.Name)
 	if name == "" {
-		return ServerConfig{}, errors.New(i18n.T("err.nameRequired"))
+		return ServerConfig{}, i18n.LErr("err.nameRequired")
 	}
 	for _, s := range existing {
 		if s.ID != excludeID && s.Name == name {
-			return ServerConfig{}, errors.New(i18n.T("err.nameExists", name))
+			return ServerConfig{}, i18n.LErr("err.nameExists", name)
 		}
 	}
 
 	addr := trimSpace(input.ServerAddr)
 	if addr == "" {
-		return ServerConfig{}, errors.New(i18n.T("err.addrRequired"))
+		return ServerConfig{}, i18n.LErr("err.addrRequired")
 	}
 	// 端口：仅 0 视为未填（默认 7000）；负数/超界是明确输入错误，拒绝而非猜测
 	port := input.ServerPort
@@ -594,14 +635,14 @@ func buildServer(input ServerInput, existing []ServerConfig, excludeID string) (
 	case port == 0:
 		port = newServerDefaultPort
 	case port < 1 || port > 65535:
-		return ServerConfig{}, errors.New(i18n.T("err.portRange"))
+		return ServerConfig{}, i18n.LErr("err.portRange")
 	}
 
 	// 端点查重：规范化 host+port 相同即视为同一目标（不做 DNS 解析）
 	key := serverEndpointKey(addr, port)
 	for _, s := range existing {
 		if s.ID != excludeID && serverEndpointKey(s.ServerAddr, s.ServerPort) == key {
-			return ServerConfig{}, errors.New(i18n.T("err.endpointExists", s.ServerAddr, s.ServerPort, s.Name))
+			return ServerConfig{}, i18n.LErr("err.endpointExists", s.ServerAddr, s.ServerPort, s.Name)
 		}
 	}
 
@@ -618,12 +659,12 @@ func buildServer(input ServerInput, existing []ServerConfig, excludeID string) (
 	if input.HTTPEnabled {
 		out.BaseDomain = trimSpace(input.BaseDomain)
 		if out.BaseDomain == "" {
-			return ServerConfig{}, errors.New(i18n.T("err.baseDomainRequired"))
+			return ServerConfig{}, i18n.LErr("err.baseDomainRequired")
 		}
 		out.Scheme = normalizeScheme(input.Scheme)
 		// 协议端口与控制端口同口径：仅 0 视为未填（协议默认端口）；负数/越界明确拒绝
 		if input.PublicPort < 0 || input.PublicPort > 65535 {
-			return ServerConfig{}, errors.New(i18n.T("err.publicPortRange"))
+			return ServerConfig{}, i18n.LErr("err.publicPortRange")
 		}
 		out.PublicPort = input.PublicPort
 	} else if old, ok := findServer(existing, excludeID); ok {
@@ -666,7 +707,7 @@ func (s *Store) UpdateServer(id string, input ServerInput) (Config, error) {
 
 	old, ok := findServer(s.cfg.Servers, id)
 	if !ok {
-		return s.cloneConfig(), errors.New(i18n.T("err.serverNotFound"))
+		return s.cloneConfig(), i18n.LErr("err.serverNotFound")
 	}
 	updated, err := buildServer(input, s.cfg.Servers, id)
 	if err != nil {
@@ -676,7 +717,7 @@ func (s *Store) UpdateServer(id string, input ServerInput) (Config, error) {
 	// 能力收回校验：仍有 HTTP 隧道引用（含停用）时禁止关闭 HTTP 支持
 	if old.HTTPEnabled && !updated.HTTPEnabled {
 		if n := s.httpRefCountLocked(id); n > 0 {
-			return s.cloneConfig(), errors.New(i18n.T("err.httpRefCount", n))
+			return s.cloneConfig(), i18n.LErr("err.httpRefCount", n)
 		}
 	}
 	for i := range s.cfg.Servers {
@@ -697,7 +738,7 @@ func (s *Store) DeleteServer(id string) (Config, error) {
 	defer s.mu.Unlock()
 
 	if _, ok := findServer(s.cfg.Servers, id); !ok {
-		return s.cloneConfig(), errors.New(i18n.T("err.serverNotFound"))
+		return s.cloneConfig(), i18n.LErr("err.serverNotFound")
 	}
 	refs := 0
 	for _, svc := range s.cfg.Services {
@@ -706,7 +747,7 @@ func (s *Store) DeleteServer(id string) (Config, error) {
 		}
 	}
 	if refs > 0 {
-		return s.cloneConfig(), errors.New(i18n.T("err.tunnelRefCount", refs))
+		return s.cloneConfig(), i18n.LErr("err.tunnelRefCount", refs)
 	}
 	kept := s.cfg.Servers[:0]
 	for _, sv := range s.cfg.Servers {
@@ -762,7 +803,7 @@ func (s *Store) UpdateService(id string, input ServiceInput) (Config, error) {
 		}
 	}
 	if idx < 0 {
-		return s.cloneConfig(), errors.New(i18n.T("err.serviceNotFound"))
+		return s.cloneConfig(), i18n.LErr("err.serviceNotFound")
 	}
 	svc, err := s.buildServiceLocked(input, id)
 	if err != nil {
@@ -784,7 +825,7 @@ func (s *Store) UpdateService(id string, input ServiceInput) (Config, error) {
 func (s *Store) buildServiceLocked(input ServiceInput, excludeID string) (Service, error) {
 	name := trimSpace(input.Name)
 	if name == "" {
-		return Service{}, errors.New(i18n.T("err.svcNameRequired"))
+		return Service{}, i18n.LErr("err.svcNameRequired")
 	}
 
 	localHost := trimSpace(input.LocalHost)
@@ -792,17 +833,17 @@ func (s *Store) buildServiceLocked(input ServiceInput, excludeID string) (Servic
 		localHost = "127.0.0.1"
 	}
 	if input.LocalPort < 1 || input.LocalPort > 65535 {
-		return Service{}, errors.New(i18n.T("err.localPortRange"))
+		return Service{}, i18n.LErr("err.localPortRange")
 	}
 
 	server, ok := findServer(s.cfg.Servers, trimSpace(input.ServerID))
 	if !ok {
-		return Service{}, errors.New(i18n.T("err.serverRequired"))
+		return Service{}, i18n.LErr("err.serverRequired")
 	}
 
 	icon := trimSpace(input.Icon)
 	if len([]rune(icon)) > 8 {
-		return Service{}, errors.New(i18n.T("err.iconTooLong"))
+		return Service{}, i18n.LErr("err.iconTooLong")
 	}
 
 	svcType := strings.ToLower(trimSpace(input.Type))
@@ -810,10 +851,10 @@ func (s *Store) buildServiceLocked(input ServiceInput, excludeID string) (Servic
 		svcType = TypeHTTP
 	}
 	if svcType != TypeHTTP && svcType != TypeTCP && svcType != TypeUDP {
-		return Service{}, errors.New(i18n.T("err.typeInvalid"))
+		return Service{}, i18n.LErr("err.typeInvalid")
 	}
 	if svcType == TypeHTTP && !server.HTTPEnabled {
-		return Service{}, errors.New(i18n.T("err.httpNotSupported", server.Name))
+		return Service{}, i18n.LErr("err.httpNotSupported", server.Name)
 	}
 
 	out := Service{
@@ -829,13 +870,13 @@ func (s *Store) buildServiceLocked(input ServiceInput, excludeID string) (Servic
 	switch svcType {
 	case TypeTCP, TypeUDP:
 		if input.RemotePort < 1 || input.RemotePort > 65535 {
-			return Service{}, errors.New(i18n.T("err.remotePortRange"))
+			return Service{}, i18n.LErr("err.remotePortRange")
 		}
 		// RemotePort 冲突域 = 同服务器 + 同协议（TCP/UDP 端口空间独立，同数字允许；
 		// 跨服务器允许复用）
 		for _, svc := range s.cfg.Services {
 			if svc.ID != excludeID && svc.ServerID == server.ID && svc.Type == svcType && svc.RemotePort == input.RemotePort {
-				return Service{}, errors.New(i18n.T("err.remotePortTaken", strings.ToUpper(svcType), input.RemotePort))
+				return Service{}, i18n.LErr("err.remotePortTaken", strings.ToUpper(svcType), input.RemotePort)
 			}
 		}
 		out.RemotePort = input.RemotePort
@@ -851,7 +892,7 @@ func (s *Store) buildServiceLocked(input ServiceInput, excludeID string) (Servic
 			}
 			// subdomainOwnedByLocked 已排除被编辑服务自身：保留自己的前缀不算重复
 			if s.subdomainOwnedByLocked(sub, server.ID, excludeID) {
-				return Service{}, errors.New(i18n.T("err.subdomainExists", sub))
+				return Service{}, i18n.LErr("err.subdomainExists", sub)
 			}
 		}
 		out.Subdomain = sub
@@ -894,7 +935,7 @@ func (s *Store) SetServiceEnabled(id string, enabled bool) (Config, error) {
 		}
 	}
 	if idx < 0 {
-		return s.cloneConfig(), errors.New(i18n.T("err.serviceNotFound"))
+		return s.cloneConfig(), i18n.LErr("err.serviceNotFound")
 	}
 	s.cfg.Services[idx].Enabled = enabled
 	if err := s.save(); err != nil {
@@ -926,10 +967,10 @@ var subdomainRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
 // validateSubdomain 校验子域名前缀（3-63 位小写字母/数字/短横线）。
 func validateSubdomain(sub string) error {
 	if len(sub) < 3 || len(sub) > 63 {
-		return errors.New(i18n.T("err.subdomainLen"))
+		return i18n.LErr("err.subdomainLen")
 	}
 	if !subdomainRe.MatchString(sub) {
-		return errors.New(i18n.T("err.subdomainChars"))
+		return i18n.LErr("err.subdomainChars")
 	}
 	return nil
 }
@@ -953,8 +994,16 @@ func generateSubdomain(existing map[string]bool) string {
 // 地址必填；enabled 隧道数必须 ≥1（无隧道不空连）；
 // enabled 的 HTTP 隧道要求目标服务器支持 HTTP（归属悬空在 Config 层已挡）。
 func ValidateServerStart(server ServerConfig, svcs []Service) string {
+	msg, _, _ := ValidateServerStartKeyed(server, svcs)
+	return msg
+}
+
+// ValidateServerStartKeyed 校验并返回（当前语言消息， 稳定 key， key 参数）：
+// 校验通过返回空 key。msg 供状态/错误等 UI（继续双语），key+args 供日志通道
+// 经 i18n.TL(i18n.EN, ...) 固定英文重渲染（环形日志不随界面语言翻译）。
+func ValidateServerStartKeyed(server ServerConfig, svcs []Service) (msg, key string, args []any) {
 	if trimSpace(server.ServerAddr) == "" {
-		return i18n.T("msg.noAddr")
+		return i18n.T("msg.noAddr"), "msg.noAddr", nil
 	}
 	enabled := 0
 	for _, svc := range svcs {
@@ -962,14 +1011,14 @@ func ValidateServerStart(server ServerConfig, svcs []Service) string {
 			continue
 		}
 		if svc.Type == TypeHTTP && !server.HTTPEnabled {
-			return i18n.T("msg.httpDisabledSvc", server.Name, svc.Name)
+			return i18n.T("msg.httpDisabledSvc", server.Name, svc.Name), "msg.httpDisabledSvc", []any{server.Name, svc.Name}
 		}
 		enabled++
 	}
 	if enabled == 0 {
-		return i18n.T("msg.noEnabled", server.Name)
+		return i18n.T("msg.noEnabled", server.Name), "msg.noEnabled", []any{server.Name}
 	}
-	return ""
+	return "", "", nil
 }
 
 // PublicURL 拼接 HTTP 隧道的公网访问地址：

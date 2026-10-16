@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,14 +82,41 @@ func TestBuildSnapshotMergesServerStatuses(t *testing.T) {
 	}
 }
 
-// TestSummarizeFailures 失败摘要：无失败 nil；有失败带服务器名与原因
-// （真实路径：StartServer 指向已关闭端口 → failed）。
+// TestSummarizeFailures 失败摘要：无失败 nil；有失败时为双语错误——UI 走当前
+// 语言（含服务器名与原因），日志通道（ErrText）固定英文且无本地化残留；
+// 纯函数 summarizeFailedServers 直接用手工快照驱动（无需真实运行实例）。
 func TestSummarizeFailures(t *testing.T) {
 	svc := newTestAppService(t)
 	if err := svc.summarizeFailures(); err != nil {
 		t.Fatalf("无失败应返回 nil: %v", err)
 	}
 
+	t.Cleanup(func() { i18n.Set(i18n.ZH) })
+	i18n.SetPreference(i18n.PrefZH)
+	snap := configstore.Snapshot{
+		Config: configstore.Config{Servers: []configstore.ServerConfig{{ID: "a", Name: "prod-1"}}},
+		ServerStatuses: []configstore.ServerStatus{
+			{ServerID: "a", State: configstore.StateFailed, Message: "注册代理配置失败", MessageEN: "Failed to register proxy configuration"},
+			{ServerID: "b", State: configstore.StateRunning, Message: "已连接", MessageEN: "Connected"},
+		},
+	}
+	err := summarizeFailedServers(snap)
+	if err == nil {
+		t.Fatal("有 failed 状态应返回错误")
+	}
+	if got := err.Error(); !strings.Contains(got, "1 台服务器启动失败") || !strings.Contains(got, "prod-1：注册代理配置失败") {
+		t.Fatalf("UI 错误应为当前语言（含服务器名与原因）: %q", got)
+	}
+	if en := i18n.ErrText(err); en != "1 server(s) failed to start (prod-1: Failed to register proxy configuration)" {
+		t.Fatalf("日志通道应为固定英文: %q", en)
+	}
+	// 服务器已删除（无归属名）时回退 ID；英文通道不得带入本地化状态文案
+	orphan := summarizeFailedServers(configstore.Snapshot{
+		ServerStatuses: []configstore.ServerStatus{{ServerID: "gone", State: configstore.StateFailed, Message: "启动失败"}},
+	})
+	if got := i18n.ErrText(orphan); got != "1 server(s) failed to start (gone: )" {
+		t.Fatalf("无归属名应回退 ID 且英文通道不含中文: %q", got)
+	}
 }
 
 // TestSetLanguagePersistsAndApplies 语言绑定：合法偏好落盘并即时应用进程语言；

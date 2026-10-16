@@ -69,6 +69,6 @@ func main() {
 	appService.attachUI(app, window)
 
 	if err := app.Run(); err != nil {
-		slog.Error("应用退出异常", "err", err)
+		slog.Error("app exited with an error", "err", err)
 	}
 }

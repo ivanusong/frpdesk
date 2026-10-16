@@ -11,6 +11,7 @@
 package i18n
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -108,6 +109,12 @@ func T(key string, args ...any) string {
 	return TL(Current(), key, args...)
 }
 
+// TLEn 固定英文取词（终端诊断日志通道专用）：与 T 同插值规则，但恒用英文文案，
+// 保证日志输出不随界面语言变化（状态/错误等 UI 仍走 T 保持双语）。
+func TLEn(key string, args ...any) string {
+	return TL(EN, key, args...)
+}
+
 // TL 指定语言取文案（测试与回退逻辑复用）。
 func TL(l Lang, key string, args ...any) string {
 	if l != ZH && l != EN {
@@ -151,7 +158,8 @@ func interpolate(text string, args ...any) string {
 }
 
 // sentinelError 包装哨兵错误：Error() 按当前语言渲染，Unwrap 保留哨兵身份
-// （errors.Is 继续命中原哨兵，调用方分支判断不受影响）。
+// （errors.Is 继续命中原哨兵，调用方分支判断不受影响）；EN() 固定英文
+// （日志通道用，见 ErrText）。
 type sentinelError struct {
 	sentinel error
 	key      string
@@ -159,11 +167,83 @@ type sentinelError struct {
 }
 
 func (e *sentinelError) Error() string { return T(e.key, e.args...) }
+func (e *sentinelError) EN() string    { return TLEn(e.key, e.args...) }
 func (e *sentinelError) Unwrap() error { return e.sentinel }
 
 // Err 返回保留哨兵身份（errors.Is）且消息按当前语言渲染的错误。
 func Err(sentinel error, key string, args ...any) error {
 	return &sentinelError{sentinel: sentinel, key: key, args: args}
+}
+
+// LocalizedError 双语错误：Error() 按进程当前语言渲染（状态/错误等 UI 继续双语），
+// 固定英文文本经 ErrText 取出（环形日志通道用，不随界面语言变化）。
+// 可选包装下层错误：Unwrap 透传，errors.Is/As 语义不受影响。
+type LocalizedError struct {
+	key  string
+	args []any
+	// enArgs 可选：EN 渲染专用参数（nil 时与 args 相同）。用于参数本身需分语言
+	// 构造的复合消息（如失败汇总的条目串），保证 EN() 整体无本地化残留。
+	enArgs []any
+	err    error // 可选下层错误（nil = 无包装）
+}
+
+// LErr 构造双语错误（无包装）。key 必须在词典中存在（i18n_test 兜底）。
+func LErr(key string, args ...any) *LocalizedError {
+	return &LocalizedError{key: key, args: args}
+}
+
+// LErrArgs 双语错误（分语言参数）：Error() 用 args 按当前语言渲染（UI），
+// EN() 用 enArgs 固定英文渲染（日志通道）。用于参数本身已是分语言构造的
+// 复合消息；enArgs 为 nil 时回退 args。
+func LErrArgs(key string, args, enArgs []any) *LocalizedError {
+	return &LocalizedError{key: key, args: args, enArgs: enArgs}
+}
+
+// LErrWrap 构造带下层错误的双语错误：渲染形如 "<当前语言文案>: <下层错误>"。
+func LErrWrap(key string, err error, args ...any) *LocalizedError {
+	return &LocalizedError{key: key, args: args, err: err}
+}
+
+func (e *LocalizedError) Error() string {
+	msg := T(e.key, e.args...)
+	if e.err != nil {
+		return msg + ": " + e.err.Error()
+	}
+	return msg
+}
+
+// Unwrap 透传下层错误，保留 errors.Is/As 判断链。
+func (e *LocalizedError) Unwrap() error { return e.err }
+
+// EN 固定英文渲染（环形/终端日志通道专用；包装链逐层取英文）。
+func (e *LocalizedError) EN() string {
+	args := e.enArgs
+	if args == nil {
+		args = e.args
+	}
+	msg := TL(EN, e.key, args...)
+	if e.err != nil {
+		return msg + ": " + ErrText(e.err)
+	}
+	return msg
+}
+
+// ErrText 返回错误的「固定英文」文本：LocalizedError/sentinelError 取英文渲染
+// （状态/错误 UI 仍走 Error() 保持双语），其余错误保持原文
+// （FRP/OS 原始错误不在本类型体系内，原样进日志便于排查）。
+func ErrText(err error) string {
+	if err == nil {
+		return ""
+	}
+	var le *LocalizedError
+	if errors.As(err, &le) {
+		return le.EN()
+	}
+	var se interface{ EN() string }
+	if errors.As(err, &se) {
+		return se.EN()
+	}
+	return err.Error()
 }
 
 // detectSystem 探测操作系统语言（结果缓存；详见各平台 detect_*.go）。

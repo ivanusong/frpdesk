@@ -256,7 +256,7 @@ func TestAttachDevVersionDisables(t *testing.T) {
 		if fw.initCalled != 0 {
 			t.Errorf("version=%q: dev 版不得 Init 框架更新器", version)
 		}
-		if !logs.contains("禁用") {
+		if !logs.contains("disabled") {
 			t.Errorf("version=%q: dev 版应有清晰禁用日志", version)
 		}
 		if _, err := c.check("手动检查"); !errors.Is(err, errUpdaterDisabled) {
@@ -325,7 +325,7 @@ func TestAttachWithoutManifestURLDisables(t *testing.T) {
 	if fw.initCalled != 0 {
 		t.Errorf("未配置更新源不得 Init 框架更新器")
 	}
-	if !logs.contains("未配置更新源") {
+	if !logs.contains("No update source configured") {
 		t.Errorf("应有清晰禁用日志：%v", logs.line)
 	}
 	if _, err := c.check("手动检查"); !errors.Is(err, errUpdaterDisabled) {
@@ -370,7 +370,7 @@ func TestCheckAvailable(t *testing.T) {
 	if last.Notes != fw.checkRel.Notes {
 		t.Errorf("事件 payload Notes = %q, want 透传 %q", last.Notes, fw.checkRel.Notes)
 	}
-	if !logs.contains("发现新版本 2.0.0") {
+	if !logs.contains("new version 2.0.0 found") {
 		t.Error("发现新版本应记日志")
 	}
 }
@@ -501,7 +501,7 @@ func TestInstallHappyPath(t *testing.T) {
 	if em.lastInfo().State != updReady {
 		t.Errorf("最终事件 = %+v, want ready", em.lastInfo())
 	}
-	if !logs.contains("用户确认安装") || !logs.contains("重启流程已启动") {
+	if !logs.contains("Install confirmed by user") || !logs.contains("Restart initiated") {
 		t.Error("安装与重启应记日志")
 	}
 }
@@ -532,7 +532,7 @@ func TestInstallDownloadErrorReturnedDirectly(t *testing.T) {
 	if got := c.stagedVersionSnapshot(); got != "" {
 		t.Errorf("下载失败不得置 staged，got %q", got)
 	}
-	if !logs.contains("下载/校验/安装失败") {
+	if !logs.contains("download/verify/install failed") {
 		t.Error("下载失败应记日志")
 	}
 
@@ -774,7 +774,7 @@ func TestVerifyingInstallingMirrorAndLateGuard(t *testing.T) {
 	if c.snapshot().State != updInstalling {
 		t.Fatalf("state = %q, want installing", c.snapshot().State)
 	}
-	if !logs.contains("校验") || !logs.contains("staging") {
+	if !logs.contains("verification") || !logs.contains("staging") {
 		t.Error("校验/安装阶段应记日志")
 	}
 
@@ -830,7 +830,7 @@ func TestShutdownCancelsOps(t *testing.T) {
 	if err := c.install(); !errors.Is(err, errUpdaterShuttingD) {
 		t.Errorf("err = %v, want errUpdaterShuttingD", err)
 	}
-	waitFor(t, func() bool { return logs.contains("后台定时检查已停止") }, "定时检查 goroutine 应退出")
+	waitFor(t, func() bool { return logs.contains("periodic check stopped") }, "定时检查 goroutine 应退出")
 }
 
 // --- 辅助函数 ---

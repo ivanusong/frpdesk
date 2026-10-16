@@ -60,14 +60,14 @@ func Run(ctx context.Context, opt Options) {
 	}
 	opt.Log = logf
 
-	logf("info", "[更新] 开始清理更新残留（目录 %s，当前可执行文件 %s，至多尝试 %d 次）",
+	logf("info", "[update] Starting update residue cleanup (dir %s, exe %s, up to %d attempts)",
 		opt.Dir, opt.ExeBase, opt.MaxAttempts)
 	for attempt := 1; ; attempt++ {
 		// 首次与每次重试前统一等待：更新刚完成时旧 EXE 可能仍被占用，给足退避；
 		// 等待期间应用退出（ctx 取消）则放弃清理
 		select {
 		case <-ctx.Done():
-			logf("info", "[更新] 更新残留清理已取消（应用退出，第 %d 次尝试前）", attempt)
+			logf("info", "[update] Update residue cleanup canceled (app quit, before attempt %d)", attempt)
 			return
 		case <-time.After(opt.Delay):
 		}
@@ -75,27 +75,27 @@ func Run(ctx context.Context, opt Options) {
 		remaining, removed, err := sweep(ctx, opt)
 		if ctx.Err() != nil {
 			// sweep 中途取消（应用退出）：统一 info 收尾，不误报扫描/删除失败
-			logf("info", "[更新] 更新残留清理已取消（应用退出，第 %d 次尝试中）", attempt)
+			logf("info", "[update] Update residue cleanup canceled (app quit, during attempt %d)", attempt)
 			return
 		}
 		if err != nil {
-			logf("error", "[更新] 扫描更新残留失败（第 %d 次尝试，目录 %s）：%v", attempt, opt.Dir, err)
+			logf("error", "[update] Failed to scan update residue (attempt %d, dir %s): %v", attempt, opt.Dir, err)
 			if attempt >= opt.MaxAttempts {
-				logf("warn", "[更新] 扫描更新残留已达重试上限（%d 次），将在下次启动时重试", opt.MaxAttempts)
+				logf("warn", "[update] Update residue scan hit the retry limit (%d attempts); will retry on next launch", opt.MaxAttempts)
 				return
 			}
 			continue
 		}
 		if remaining == 0 {
-			logf("info", "[更新] 更新残留清理完成（第 %d 次尝试，本次删除 %d 个）", attempt, removed)
+			logf("info", "[update] Update residue cleanup finished (attempt %d, removed %d)", attempt, removed)
 			return
 		}
 		if attempt >= opt.MaxAttempts {
-			logf("warn", "[更新] 更新残留清理未完成：已达重试上限（%d 次），仍剩 %d 个被占用文件，将在下次启动时重试",
+			logf("warn", "[update] Update residue cleanup incomplete: retry limit reached (%d attempts), %d locked file(s) remain; will retry on next launch",
 				opt.MaxAttempts, remaining)
 			return
 		}
-		logf("warn", "[更新] 更新残留删除失败（第 %d 次尝试剩 %d 个，多为文件被占用），%s 后重试",
+		logf("warn", "[update] Failed to remove some update residue (attempt %d, %d remaining, usually file locked); retrying in %s",
 			attempt, remaining, opt.Delay)
 	}
 }
@@ -113,7 +113,7 @@ func sweep(ctx context.Context, opt Options) (remaining, removed int, err error)
 			continue
 		}
 		if !e.Type().IsRegular() {
-			opt.Log("warn", "[更新] 跳过非常规残留 %s（目录/符号链接，不删除）", filepath.Join(opt.Dir, e.Name()))
+			opt.Log("warn", "[update] Skipping non-regular residue %s (directory/symlink; not deleted)", filepath.Join(opt.Dir, e.Name()))
 			continue
 		}
 		if ctx.Err() != nil {
@@ -121,12 +121,12 @@ func sweep(ctx context.Context, opt Options) (remaining, removed int, err error)
 		}
 		full := filepath.Join(opt.Dir, e.Name())
 		if rmErr := opt.Remove(full); rmErr != nil {
-			opt.Log("warn", "[更新] 删除更新残留失败 %s：%v", full, rmErr)
+			opt.Log("warn", "[update] Failed to remove update residue %s: %v", full, rmErr)
 			remaining++
 			continue
 		}
 		removed++
-		opt.Log("info", "[更新] 已删除更新残留 %s", full)
+		opt.Log("info", "[update] Removed update residue %s", full)
 	}
 	return remaining, removed, nil
 }

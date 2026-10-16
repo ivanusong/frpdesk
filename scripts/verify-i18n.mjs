@@ -108,6 +108,52 @@ check("缺失参数占位符原样保留", t("srv.linked", "A") === "关联 A �
 applyPref("en", { persist: false });
 check("英文插值", t("srv.linked", "A", "B") === "A tunnel(s) linked · B enabled", t("srv.linked", "A", "B"));
 
+// ---------- 8) 运行日志与诊断通道固定英文 ----------
+// 前端保证：FrontendLog(...) 实参不得含 CJK 字面量（诊断通道落后端终端日志，
+// 不随界面语言翻译；可见 toast 仍走 t() 双语）。逐个 FrontendLog( 调用做
+// 括号配平后扫描实参文本。
+function frontendlLogArgs(src) {
+  const args = [];
+  let idx = src.indexOf("FrontendLog(");
+  while (idx !== -1) {
+    let depth = 0;
+    let end = -1;
+    for (let i = idx + "FrontendLog".length; i < src.length; i++) {
+      const c = src[i];
+      if (c === "(") depth++;
+      else if (c === ")") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) break; // 括号不配平：交给语法工具报错，这里不误报
+    args.push(src.slice(idx + "FrontendLog(".length, end));
+    idx = src.indexOf("FrontendLog(", end);
+  }
+  return args;
+}
+const hanRe = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const flArgs = frontendlLogArgs(mainSrc);
+const flBad = flArgs.filter((a) => hanRe.test(a));
+check(
+  `FrontendLog 诊断通道无中文文案（${flArgs.length} 处调用）`,
+  flArgs.length > 0 && flBad.length === 0,
+  flBad.join(" | "),
+);
+// 日志面板公共归属固定 System（不随界面语言翻译，不进词典）
+check(
+  "日志归属固定 System（渲染不用词典 key）",
+  mainSrc.includes('e.serverName || "System"') && !mainSrc.includes('t("log.system")'),
+);
+// 语言按钮两态契约：按当前生效语言取反切换，不再有 system/zh/en 三态循环
+check(
+  "语言按钮为中/EN 两态切换（无三态循环）",
+  mainSrc.includes('currentLang() === "zh-CN" ? "en" : "zh-CN"') && !mainSrc.includes("LANG_ORDER"),
+);
+
 // ---------- 汇总 ----------
 console.log(`\n===== 词典校验汇总：${pass}/${pass + fail} 通过（词典 ${keys.length} 条） =====`);
 process.exit(fail ? 1 : 0);

@@ -17,10 +17,10 @@ frpdesk is a native desktop client for [frp](https://github.com/fatedier/frp), b
 
 ## UI language
 
-- The title-bar language button cycles through **System → 简体中文 → English**; the default is System, which uses Simplified Chinese on Chinese systems and falls back to English for other languages. In System mode the **native side resolves the language** (environment variables first, then the platform UI language) and the webview follows that result, so the UI and the tray menu always agree.
+- The title-bar language button is a two-state switch between **中文 ⇄ English**; it shows the current language (`中` or `EN`) and its tooltip/aria label states both the current language and what clicking will switch to. On first launch (or with no saved preference) the app follows the system language — Simplified Chinese on Chinese systems, English otherwise — and in that mode the **native side resolves the language** (environment variables first, then the platform UI language) with the webview following that result, so the UI and the tray menu always agree. Clicking the button always saves an explicit `zh-CN` or `en` preference and never returns to the system-follow mode.
 - The choice is persisted: the frontend stores it locally and also saves it in the config file (`language` field of `config.json`), so the tray menu and backend messages keep the same language after a restart. If saving fails, the UI rolls back to the last confirmed choice and shows an error instead of silently drifting from the tray.
 - Switching applies instantly: page, cards, forms, statistics, confirmations, toasts, tooltips and ARIA labels are re-rendered; unsaved form input is kept and tunnels are not restarted.
-- User data (service names, server addresses, domains), technical logs and raw FRP errors stay in their original form for troubleshooting.
+- User data (service names, server addresses, domains), raw FRP errors and technical logs stay in their original form for troubleshooting. App-generated runtime logs — both the **Logs** panel and the terminal diagnostic logs (`slog`/stderr, update and cleanup messages) — are fixed in English and do not follow the interface language.
 
 ## Translation contributions
 

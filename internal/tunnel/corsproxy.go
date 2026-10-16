@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -63,7 +62,8 @@ func newCORSProxy(set *corsProxySet, localHost string, localPort int, serviceID 
 	target := net.JoinHostPort(localHost, strconv.Itoa(localPort))
 	ln, err := listenCORSProxy()
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("err.listenProxyFail"), err)
+		// 双语错误：状态/错误 UI 按当前语言，环形日志经 i18n.ErrText 固定英文
+		return nil, i18n.LErrWrap("err.listenProxyFail", err)
 	}
 
 	// 上游连接池每实例独占：不污染全局 DefaultTransport，Close 时能关闭自己的
@@ -115,7 +115,7 @@ func newCORSProxy(set *corsProxySet, localHost string, localPort int, serviceID 
 			} else {
 				mergeVary(w.Header(), "Origin")
 			}
-			slog.Warn("[CORS] 转发后端失败", "target", target, "err", err)
+			slog.Warn("[cors] failed to forward to upstream", "target", target, "err", err)
 			w.WriteHeader(http.StatusBadGateway)
 		},
 		// 立即 flush：大文件流式转发与 SSE 都及时到达客户端
@@ -150,7 +150,7 @@ func newCORSProxy(set *corsProxySet, localHost string, localPort int, serviceID 
 	p.server = &http.Server{Handler: handler}
 	go func() {
 		if err := p.server.Serve(&trackedListener{Listener: ln, proxy: p}); err != nil && err != http.ErrServerClosed {
-			slog.Warn("[代理] HTTP 本地代理监听退出", "target", target, "err", err)
+			slog.Warn("[proxy] HTTP local proxy listener exited", "target", target, "err", err)
 		}
 	}()
 	return p, nil
@@ -227,7 +227,7 @@ func (w *countingResponseWriter) Flush() {
 func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hj, ok := w.ResponseWriter.(http.Hijacker)
 	if !ok {
-		return nil, nil, fmt.Errorf("ResponseWriter 不支持 Hijack: %T", w.ResponseWriter)
+		return nil, nil, fmt.Errorf("ResponseWriter does not support Hijack: %T", w.ResponseWriter)
 	}
 	conn, brw, err := hj.Hijack()
 	if err == nil && !w.reported {
@@ -286,7 +286,7 @@ func (p *corsProxy) Close() {
 			_ = c.Close() // 含 hijack 的升级连接（server.Close 不负责）
 		}
 		p.transport.CloseIdleConnections() // 本实例独占连接池：闲置上游连接随之关闭
-		slog.Info("[代理] 已释放 HTTP 本地代理", "listen", p.addr(), "target", p.target)
+		slog.Info("[proxy] released HTTP local proxy", "listen", p.addr(), "target", p.target)
 	})
 }
 
@@ -439,7 +439,7 @@ func (s *corsProxySet) syncTo(svcs []configstore.Service) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return errors.New(i18n.T("err.proxySetClosed"))
+		return i18n.LErr("err.proxySetClosed")
 	}
 	var removed []*corsProxy
 	for id, p := range s.proxies {
@@ -451,7 +451,7 @@ func (s *corsProxySet) syncTo(svcs []configstore.Service) error {
 	}
 	s.mu.Unlock()
 	for _, p := range removed {
-		slog.Info("[代理] 移除 HTTP 本地代理", "listen", p.addr(), "target", p.target)
+		slog.Info("[proxy] removed HTTP local proxy", "listen", p.addr(), "target", p.target)
 		p.Close()
 	}
 
@@ -462,10 +462,10 @@ func (s *corsProxySet) syncTo(svcs []configstore.Service) error {
 		}
 		p, err := newCORSProxy(s, svc.LocalHost, svc.LocalPort, svc.ID)
 		if err != nil {
-			return fmt.Errorf("%s: %w", i18n.T("err.svcProxyFail", svc.Name), err)
+			return i18n.LErrWrap("err.svcProxyFail", err, svc.Name)
 		}
 		s.add(svc.ID, p)
-		slog.Info("[代理] 新建 HTTP 本地代理（内置跨域+本地 Host）",
+		slog.Info("[proxy] created HTTP local proxy (built-in CORS + Host rewrite)",
 			"service", svc.Name, "id", svc.ID, "listen", p.addr(), "target", p.target)
 	}
 	return nil
@@ -495,7 +495,7 @@ func writeCORSPreflight(w http.ResponseWriter, r *http.Request, origin, reqMetho
 	// 预检结果随 Origin/请求方法/请求头变化，缓存不得跨这些维度复用
 	mergeVary(h, "Access-Control-Request-Method", "Access-Control-Request-Headers")
 	w.WriteHeader(http.StatusNoContent)
-	slog.Debug("[CORS] 预检本地应答", "origin", origin, "method", reqMethod)
+	slog.Debug("[cors] local preflight response", "origin", origin, "method", reqMethod)
 }
 
 // mergeVary 把字段合并进已有 Vary：大小写不敏感去重、保留原顺序与原始写法；

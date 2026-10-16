@@ -314,7 +314,7 @@ func TestFailoverCheck_MirrorErrorFallsBackToPrimary(t *testing.T) {
 	if rel == nil || rel.Version != "0.2.11" {
 		t.Fatalf("rel = %+v, want 0.2.11", rel)
 	}
-	if !logs.contains("mirror 更新源检查失败") {
+	if !logs.contains("mirror source check failed") {
 		t.Errorf("应记录镜像错误日志：%v", logs.line)
 	}
 }
@@ -808,7 +808,7 @@ func TestNewUpdateProvider_InvalidMirrorFallsBackToPrimary(t *testing.T) {
 	if prov.Name() != "endpoint" {
 		t.Errorf("Name = %q, want endpoint（镜像配置非法时回退主源）", prov.Name())
 	}
-	if !logs.contains("镜像更新源配置无效") {
+	if !logs.contains("Invalid mirror source config") {
 		t.Errorf("应记录镜像配置无效日志：%v", logs.line)
 	}
 }

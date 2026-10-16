@@ -648,3 +648,35 @@ func TestCreateServerPortValidation(t *testing.T) {
 		t.Fatal("编辑负数端口应拒绝")
 	}
 }
+
+// TestStatusLogMessageEN 终端日志英文通道：LogMessage 优先 MessageEN（错误详情
+// 在创建点算好的英文），其次按 MessageKey 取英文词典，二者皆空返回空串；
+// AggregateStatusEN 的 Message 为英文（失败原因取 MessageEN），UI 版仍为双语。
+func TestStatusLogMessageEN(t *testing.T) {
+	defer i18n.Set(i18n.ZH) // 恢复包默认（其余用例按中文断言）
+	i18n.SetPreference(i18n.PrefZH)
+
+	ts := TunnelStatus{State: StateFailed, Message: "失败中文", MessageEN: "english failure"}
+	if got := ts.LogMessage(); got != "english failure" {
+		t.Fatalf("LogMessage 应优先 MessageEN: %q", got)
+	}
+	byKey := TunnelStatus{State: StateStopping, Message: "停止中", MessageKey: "msg.stopping"}
+	if got := byKey.LogMessage(); got != "Stopping" {
+		t.Fatalf("LogMessage 应按 key 取英文: %q", got)
+	}
+	if got := (TunnelStatus{}).LogMessage(); got != "" {
+		t.Fatalf("无消息应返回空串: %q", got)
+	}
+
+	list := []ServerStatus{
+		{ServerID: "a", State: StateFailed, Message: "服务失败中文原因", MessageEN: "proxy registration failed"},
+	}
+	en := AggregateStatusEN(list, 1)
+	if en.State != StateFailed || !strings.Contains(en.Message, "1 server(s) failed") || !strings.Contains(en.Message, "proxy registration failed") {
+		t.Fatalf("AggregateStatusEN 应为英文且含 MessageEN 原因: %q", en.Message)
+	}
+	zh := AggregateStatus(list, 1)
+	if !strings.Contains(zh.Message, "1 台服务器失败") || !strings.Contains(zh.Message, "服务失败中文原因") {
+		t.Fatalf("AggregateStatus 应保持当前语言: %q", zh.Message)
+	}
+}

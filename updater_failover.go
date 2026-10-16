@@ -100,7 +100,7 @@ func newUpdateProvider(cfg updateProviderConfig) (updater.Provider, error) {
 	manifestURL := strings.TrimSpace(cfg.manifestURL)
 	mirrorBase, mirrorErr := normalizeMirrorBaseURL(cfg.mirrorBaseURL)
 	if mirrorErr != nil {
-		cfg.log("error", "[更新] 镜像更新源配置无效，已忽略镜像并回退主源：%v", mirrorErr)
+		cfg.log("error", "[update] Invalid mirror source config; ignoring mirror and falling back to primary: %v", mirrorErr)
 	}
 
 	if mirrorBase == "" {
@@ -113,7 +113,7 @@ func newUpdateProvider(cfg updateProviderConfig) (updater.Provider, error) {
 
 	mp, err := endpoint.New(endpoint.Config{URL: mirrorBase + "/stable.json", HTTPClient: client})
 	if err != nil {
-		return nil, fmt.Errorf("镜像更新源初始化失败：%w", err)
+		return nil, fmt.Errorf("failed to initialize mirror update source: %w", err)
 	}
 	p.sources = append(p.sources, updateSource{
 		name:     "mirror",
@@ -126,7 +126,7 @@ func newUpdateProvider(cfg updateProviderConfig) (updater.Provider, error) {
 	if manifestURL != "" {
 		pp, err := endpoint.New(endpoint.Config{URL: manifestURL, HTTPClient: client})
 		if err != nil {
-			return nil, fmt.Errorf("主更新源初始化失败：%w", err)
+			return nil, fmt.Errorf("failed to initialize primary update source: %w", err)
 		}
 		p.sources = append(p.sources, updateSource{name: "primary", provider: pp, timeout: updateManifestAttemptTimeout})
 	}
@@ -149,23 +149,23 @@ func normalizeMirrorBaseURL(raw string) (string, error) {
 		return "", nil
 	}
 	if strings.ContainsAny(raw, " \t\r\n\"'\\") {
-		return "", errors.New("镜像根地址不能包含空白或引号字符")
+		return "", errors.New("mirror base URL cannot contain whitespace or quote characters")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("镜像根地址无法解析：%w", err)
+		return "", fmt.Errorf("failed to parse the mirror base URL: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("镜像根地址必须是 http(s) 地址")
+		return "", fmt.Errorf("mirror base URL must be an http(s) URL")
 	}
 	if u.Host == "" {
-		return "", fmt.Errorf("镜像根地址缺少主机名")
+		return "", fmt.Errorf("mirror base URL has no host")
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return "", fmt.Errorf("镜像根地址不能带查询参数或片段")
+		return "", fmt.Errorf("mirror base URL must not contain a query or fragment")
 	}
 	if strings.HasSuffix(raw, "/") {
-		return "", fmt.Errorf("镜像根地址不能以 / 结尾")
+		return "", fmt.Errorf("mirror base URL must not end with '/'")
 	}
 	return raw, nil
 }
@@ -251,20 +251,20 @@ func (p *failoverProvider) merge(got []sourceCheckResult) (*updater.Release, err
 		switch {
 		case r.err != nil:
 			failures = append(failures, fmt.Errorf("%s: %w", r.src.name, r.err))
-			p.log("warn", "[更新] %s 更新源检查失败：%v", r.src.name, r.err)
+			p.log("warn", "[update] %s source check failed: %v", r.src.name, r.err)
 		case r.rel == nil:
 			anyUpToDate = true
-			p.log("info", "[更新] %s 更新源：无新版本", r.src.name)
+			p.log("info", "[update] %s source: no new version", r.src.name)
 		default:
 			releases = append(releases, r)
-			p.log("info", "[更新] %s 更新源：发现版本 %s", r.src.name, r.rel.Version)
+			p.log("info", "[update] %s source: found version %s", r.src.name, r.rel.Version)
 		}
 	}
 	if len(releases) == 0 {
 		if anyUpToDate {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("检查更新失败：%w", errors.Join(failures...))
+		return nil, fmt.Errorf("update check failed: %w", errors.Join(failures...))
 	}
 
 	chosen := chooseRelease(releases)
@@ -300,7 +300,7 @@ func (p *failoverProvider) attachCandidates(chosen sourceCheckResult, got []sour
 	if p.mirror != nil {
 		u, err := p.mirrorArtifactURL(rel.Version, filename)
 		if err != nil {
-			p.log("warn", "[更新] 无法构造镜像下载地址：%v", err)
+			p.log("warn", "[update] Failed to build the mirror download URL: %v", err)
 		} else {
 			mirrorURL = u
 		}
@@ -312,7 +312,7 @@ func (p *failoverProvider) attachCandidates(chosen sourceCheckResult, got []sour
 			continue
 		}
 		if !sameArtifact(rel, r.rel) {
-			p.log("warn", "[更新] 主源清单版本 %s 与所选版本 %s 的制品不一致，不作为回退地址",
+			p.log("warn", "[update] Primary manifest version %s artifact differs from the chosen %s; not used as the fallback URL",
 				r.rel.Version, rel.Version)
 			continue
 		}
@@ -326,19 +326,19 @@ func (p *failoverProvider) attachCandidates(chosen sourceCheckResult, got []sour
 	}
 	rel.Metadata[metaMirrorURL] = mirrorURL
 	rel.Metadata[metaPrimaryURL] = primaryURL
-	p.log("info", "[更新] 版本 %s 下载顺序：镜像=%t 主源=%t", rel.Version, mirrorURL != "", primaryURL != "")
+	p.log("info", "[update] Version %s download order: mirror=%t primary=%t", rel.Version, mirrorURL != "", primaryURL != "")
 }
 
 // mirrorArtifactURL 按镜像目录约定拼制品地址：<base>/releases/<version>/<filename>。
 func (p *failoverProvider) mirrorArtifactURL(version, filename string) (string, error) {
 	if p.mirror == nil || p.mirror.baseURL == "" {
-		return "", errors.New("未配置镜像源")
+		return "", errors.New("mirror source is not configured")
 	}
 	if version == "" || strings.ContainsAny(version, "/\\") || strings.Contains(version, "..") {
-		return "", fmt.Errorf("版本号 %q 不能用于镜像路径", version)
+		return "", fmt.Errorf("version %q cannot be used in a mirror path", version)
 	}
 	if filename == "" || filename != path.Base(filename) || strings.ContainsAny(filename, "/\\") {
-		return "", fmt.Errorf("制品文件名 %q 不能用于镜像路径", filename)
+		return "", fmt.Errorf("artifact filename %q cannot be used in a mirror path", filename)
 	}
 	return p.mirror.baseURL + "/releases/" + url.PathEscape(version) + "/" + url.PathEscape(filename), nil
 }
@@ -392,7 +392,7 @@ func candidatesFromMetadata(rel *updater.Release) []downloadCandidate {
 // 每个候选有独立尝试上限（body 挂起也能到时失败换源）；父 ctx 取消立即生效且不再换源。
 func (p *failoverProvider) Download(ctx context.Context, rel *updater.Release, dst io.Writer, onProgress func(int64, int64)) error {
 	if rel == nil {
-		return errors.New("更新包信息缺失")
+		return errors.New("update package info is missing")
 	}
 	total := rel.Artifact.Size
 	var lastErr error
@@ -416,7 +416,7 @@ func (p *failoverProvider) Download(ctx context.Context, rel *updater.Release, d
 			return err
 		}
 		lastErr = err
-		p.log("warn", "[更新] 从 %s 下载失败：%v（尝试剩余来源）", cand.name, err)
+		p.log("warn", "[update] Download from %s failed: %v (trying remaining sources)", cand.name, err)
 	}
 
 	// 主源候选缺失（检查期主源不可用/无更新/不同版本）时，实时查询主源清单，
@@ -430,8 +430,8 @@ func (p *failoverProvider) Download(ctx context.Context, rel *updater.Release, d
 		cancel()
 		if lerr != nil {
 			// 查询失败或版本不一致：原因并入最终错误，便于用户/日志排查
-			p.log("warn", "[更新] 主源回退地址查询失败：%v", lerr)
-			lastErr = errors.Join(lastErr, fmt.Errorf("主源回退地址查询失败：%w", lerr))
+			p.log("warn", "[update] Failed to look up the primary fallback URL: %v", lerr)
+			lastErr = errors.Join(lastErr, fmt.Errorf("failed to look up the primary fallback URL: %w", lerr))
 		} else if u != "" {
 			attemptCtx, cancel := context.WithTimeout(ctx, p.attemptTimeout())
 			derr := p.fetchToTempAndCommit(attemptCtx, downloadCandidate{name: "primary", url: u}, rel, dst, total, onProgress)
@@ -450,9 +450,9 @@ func (p *failoverProvider) Download(ctx context.Context, rel *updater.Release, d
 	}
 
 	if lastErr == nil {
-		lastErr = errors.New("没有可用的更新包地址")
+		lastErr = errors.New("no update package URL is available")
 	}
-	return fmt.Errorf("所有更新源下载失败：%w", lastErr)
+	return fmt.Errorf("all update sources failed to download: %w", lastErr)
 }
 
 // attemptTimeout 单个来源的下载尝试上限（构造期已设默认，防御零值）。
@@ -476,7 +476,7 @@ func (p *failoverProvider) fetchToTempAndCommit(
 ) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cand.url, nil)
 	if err != nil {
-		return fmt.Errorf("下载地址无效：%w", err)
+		return fmt.Errorf("invalid download URL: %w", err)
 	}
 	req.Header.Set("Accept", "application/octet-stream")
 
@@ -494,7 +494,7 @@ func (p *failoverProvider) fetchToTempAndCommit(
 
 	tmp, err := os.CreateTemp("", "frpdesk-update-*.part")
 	if err != nil {
-		return &localIOError{fmt.Errorf("创建临时文件失败：%w", err)}
+		return &localIOError{fmt.Errorf("failed to create the temp file: %w", err)}
 	}
 	defer func() {
 		_ = tmp.Close()
@@ -512,7 +512,7 @@ func (p *failoverProvider) fetchToTempAndCommit(
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
 			if _, werr := tmp.Write(buf[:n]); werr != nil {
-				return &localIOError{fmt.Errorf("写入临时文件失败：%w", werr)}
+				return &localIOError{fmt.Errorf("failed to write the temp file: %w", werr)}
 			}
 			if hasher != nil {
 				_, _ = hasher.Write(buf[:n])
@@ -536,18 +536,18 @@ func (p *failoverProvider) fetchToTempAndCommit(
 	}
 
 	if hasher != nil && !bytes.Equal(hasher.Sum(nil), rel.Verification.Digest) {
-		return fmt.Errorf("下载内容摘要与清单不一致")
+		return fmt.Errorf("downloaded content digest does not match the manifest")
 	}
 	// 提交前复查 ctx：取消/尝试截止若发生在读取完成之后，也不得写 dst
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return &localIOError{fmt.Errorf("读取临时文件失败：%w", err)}
+		return &localIOError{fmt.Errorf("failed to read the temp file: %w", err)}
 	}
 	// 一次性提交：若这里失败已无法回滚，直接失败，不再改试来源（避免拼接损坏）。
 	if _, err := io.Copy(dst, tmp); err != nil {
-		return &localIOError{fmt.Errorf("写入更新文件失败：%w", err)}
+		return &localIOError{fmt.Errorf("failed to write the update file: %w", err)}
 	}
 	return nil
 }
@@ -581,11 +581,11 @@ func (p *failoverProvider) lookupPrimaryArtifactURL(ctx context.Context, rel *up
 		return "", nil
 	}
 	if !sameArtifact(rel, got) {
-		return "", fmt.Errorf("主源最新版本 %s 与待安装版本 %s 不一致", got.Version, rel.Version)
+		return "", fmt.Errorf("primary latest version %s differs from the version being installed (%s)", got.Version, rel.Version)
 	}
 	u := artifactURL(got)
 	if u == "" {
-		return "", errors.New("主源清单缺少下载地址")
+		return "", errors.New("primary manifest has no download URL")
 	}
 	return u, nil
 }

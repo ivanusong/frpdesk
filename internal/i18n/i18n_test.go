@@ -52,11 +52,12 @@ func TestDictCompleteness(t *testing.T) {
 	}
 }
 
-// TestSourceKeysExist 源码 key 对齐：所有 i18n.T("key")、i18n.Err(err, "key") 与
-// MessageKey: "key" 引用的 key 必须在 dict 中存在（防止新增文案时漏进词典，
-// 运行时以 key 形式直接展示给用户）。扫描范围排除 third_party 与 frontend。
+// TestSourceKeysExist 源码 key 对齐：所有 i18n.T("key")、i18n.Err(err, "key")、
+// i18n.LErr/LErrWrap("key") 与 MessageKey: "key" 引用的 key 必须在 dict 中存在
+// （防止新增文案时漏进词典，运行时以 key 形式直接展示给用户）。
+// 扫描范围排除 third_party 与 frontend。
 func TestSourceKeysExist(t *testing.T) {
-	re := regexp.MustCompile(`(?:i18n\.T\(|MessageKey:\s*|i18n\.Err\([^,]+,\s*)"([a-z][A-Za-z]*\.[A-Za-z]+)"`)
+	re := regexp.MustCompile(`(?:i18n\.T\(|MessageKey:\s*|i18n\.Err\([^,]+,\s*|i18n\.LErrWrap\(\s*|i18n\.LErrArgs\(\s*|i18n\.LErr\(\s*)"([a-z][A-Za-z]*\.[A-Za-z]+)"`)
 	root := filepath.Join("..", "..")
 	found := 0
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -258,5 +259,54 @@ func TestErrKeepsSentinel(t *testing.T) {
 	}
 	if !errors.Is(err, sentinel) {
 		t.Fatal("errors.Is 应命中哨兵错误")
+	}
+}
+
+// TestTLEnAndErrText 固定英文通道（终端日志用）：TLEn 不随当前语言；
+// ErrText 对双语错误（LocalizedError 包装链）与哨兵包装错误取英文渲染，
+// 普通错误（FRP/OS 原始错误）保持原文。
+func TestTLEnAndErrText(t *testing.T) {
+	resetZH(t)
+	Set(ZH) // 中文界面下日志通道仍必须英文
+	if got := TLEn("msg.stopping"); got != "Stopping" {
+		t.Fatalf("TLEn(zh 下) = %q, want Stopping", got)
+	}
+	if got := TLEn("msg.noEnabled", "服务器A"); got != `Server "服务器A" has no enabled tunnels` {
+		t.Fatalf("TLEn 插值 = %q（用户名允许原样）", got)
+	}
+	le := LErrWrap("err.svcProxyFail", errors.New("listen tcp: address in use"), "服务A")
+	if got := ErrText(le); got != "Failed to create the local proxy for service 服务A: listen tcp: address in use" {
+		t.Fatalf("ErrText(LocalizedError) = %q", got)
+	}
+	if got := ErrText(Err(errors.New("updater busy"), "err.updaterBusy")); got != "Another update operation is in progress; try again later" {
+		t.Fatalf("ErrText(哨兵包装) = %q", got)
+	}
+	if got := ErrText(errors.New("raw frp error")); got != "raw frp error" {
+		t.Fatalf("ErrText(普通错误) 应原样 = %q", got)
+	}
+	if got := ErrText(nil); got != "" {
+		t.Fatalf("ErrText(nil) = %q, want empty", got)
+	}
+}
+
+// TestLErrArgs 分语言参数双语错误：Error() 用 args 按当前语言（UI），
+// EN()/ErrText 用 enArgs 固定英文（日志通道），保证参数本身分语言构造的
+// 复合消息在英文通道无本地化残留。
+func TestLErrArgs(t *testing.T) {
+	resetZH(t)
+	Set(ZH)
+	err := LErrArgs("msg.startFailed",
+		[]any{1, "prod-1：注册代理配置失败"},
+		[]any{1, "prod-1: Failed to register proxy configuration"})
+	if got := err.Error(); got != "1 台服务器启动失败（prod-1：注册代理配置失败）" {
+		t.Fatalf("Error() = %q", got)
+	}
+	if got := ErrText(err); got != "1 server(s) failed to start (prod-1: Failed to register proxy configuration)" {
+		t.Fatalf("ErrText() = %q，英文通道不得含中文", got)
+	}
+	// enArgs 为 nil 时回退 args（等同 LErr 行为）
+	fallback := LErrArgs("msg.stopping", []any{}, nil)
+	if got := ErrText(fallback); got != "Stopping" {
+		t.Fatalf("enArgs nil 应回退 args: %q", got)
 	}
 }
