@@ -52,11 +52,22 @@ node scripts/verify-i18n.mjs             # dictionary completeness and key align
 
 ## Release
 
-Push a `vX.Y.Z` tag. Its version must match both `VERSION` and the newest `## X.Y.Z`
-section of [CHANGELOG.md](CHANGELOG.md); the
-[Release workflow](.github/workflows/release.yml) then runs the tests, builds the
-macOS and Windows artifacts, generates the Wails updater `stable.json` from the
-CHANGELOG notes, and publishes everything as a GitHub Release.
+Push an **annotated** `vX.Y.Z` tag. Its version must match both `VERSION` and the
+newest `## X.Y.Z` section of [CHANGELOG.md](CHANGELOG.md); the
+tag message is the single source of the release notes. The
+[Release workflow](.github/workflows/release.yml) uses it (the body when the message
+has a subject and a body) for both the GitHub Release description and the Wails
+updater `stable.json` notes shown in-app, then runs the tests, builds the macOS and
+Windows artifacts, and publishes everything as a GitHub Release. A lightweight tag
+or an empty message fails the release before anything is published.
+
+CHANGELOG.md is still maintained for every release and checked for version
+consistency, but it no longer feeds the release notes.
+
+```bash
+git tag -a vX.Y.Z -F notes.md   # notes.md becomes the release / in-app update notes
+git push origin vX.Y.Z
+```
 
 Shipped builds check for updates against the GitHub Release `stable.json` of the
 repository they were built from (derived at build time, so forks publish their own

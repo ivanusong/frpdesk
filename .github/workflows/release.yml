@@ -1,4 +1,6 @@
-# 发布工作流：推送 v x.y.z tag 触发。严格校验 tag 与 VERSION、CHANGELOG 最新节完全一致，
+# 发布工作流：推送 annotated 的 v x.y.z tag 触发。严格校验 tag 与 VERSION、CHANGELOG 最新节完全一致，
+# 发布日志（GitHub Release 描述与 updater stable.json notes）取自 annotated tag 的描述
+# （scripts/tag-release-notes.sh，轻量 tag 或描述为空直接失败），
 # 然后复用 build.sh 构建三目标产物，生成 Wails updater stable.json，并以 GitHub Release 发布。
 # 与本地私有发布流程（MinIO/rclone）无关；普通 Build 工作流保持只读、不发布。
 # 另含独立的 sync-mirror 作业：release 成功后把已发布资产原样同步到可选 S3 镜像
@@ -8,7 +10,7 @@ name: Release
 on:
   push:
     tags:
-      # tag 形如 v0.2.9；版本格式与一致性在首个步骤内严格校验
+      # tag 形如 v0.2.9；须为 annotated tag（其描述即发布日志），版本格式与一致性在首个步骤内严格校验
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 # 创建 Release 与上传资产需要写权限
@@ -48,10 +50,13 @@ jobs:
             exit 1
           fi
 
-          # 提前摘取当前版本节，供 Release notes 与 updater manifest 共用
-          bash scripts/release-notes.sh "$tag_version" > release-notes.md
           echo "VERSION=${tag_version}" >> "$GITHUB_ENV"
           echo "[release] 版本校验通过：v${tag_version}"
+
+      - name: 生成 release-notes.md（取自 annotated tag 描述）
+        # 发布日志唯一来源：annotated tag 的 message。subject + body 时取 body，纯多行列表
+        # 原样保留；轻量 tag 或描述为空时在此失败，发布不会继续。
+        run: bash scripts/tag-release-notes.sh
 
       - name: 安装 Go（版本取自 go.mod）
         uses: actions/setup-go@v6
@@ -101,7 +106,7 @@ jobs:
           rm -rf "bin/frpdesk-${VERSION}-licenses"
           ls -lh bin/frpdesk-*
 
-      - name: 生成 Wails updater stable.json（stable 通道，notes 取自 CHANGELOG）
+      - name: 生成 Wails updater stable.json（stable 通道，notes 取自 annotated tag 描述）
         env:
           # 产物下载根：GitHub Release 固定资产路径（由仓库推导，支持 fork）
           DOWNLOAD_BASE_URL: '${{ github.server_url }}/${{ github.repository }}/releases/download'

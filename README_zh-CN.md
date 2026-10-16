@@ -58,8 +58,15 @@ node scripts/verify-i18n.mjs             # 双语词典完整性与 key 对齐
 
 ## 发布
 
-推送 `vX.Y.Z` tag。版本号必须同时与 `VERSION` 和 [CHANGELOG.md](CHANGELOG.md) 最新的 `## X.Y.Z` 小节一致；
-[Release workflow](.github/workflows/release.yml) 随后运行测试、构建 macOS 与 Windows 产物、根据 CHANGELOG 生成 Wails updater 的 `stable.json`，并整体发布为 GitHub Release。
+推送 **annotated** 的 `vX.Y.Z` tag，版本号必须同时与 `VERSION` 和 [CHANGELOG.md](CHANGELOG.md) 最新的 `## X.Y.Z` 小节一致。
+发布日志的唯一来源是 tag 描述：[Release workflow](.github/workflows/release.yml) 用它（含 subject 与 body 时取 body）生成 GitHub Release 描述与 Wails updater `stable.json` 的 notes（即应用内更新提示），随后运行测试、构建 macOS 与 Windows 产物并整体发布为 GitHub Release；轻量 tag 或描述为空会在发布前失败。
+
+[CHANGELOG.md](CHANGELOG.md) 仍需随版本维护并参与版本一致性校验，但不再作为发布日志来源。
+
+```bash
+git tag -a vX.Y.Z -F notes.md   # notes.md 即 GitHub Release / 应用内更新提示
+git push origin vX.Y.Z
+```
 
 发行版在 `https://github.com/ivanusong/frpdesk/releases/latest/download/stable.json` 检查更新。
 
