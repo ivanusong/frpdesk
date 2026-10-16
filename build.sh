@@ -2,6 +2,8 @@
 # frpdesk 一键跨平台构建：Windows amd64 + macOS arm64 + macOS amd64 一次全出。
 #
 # 可选环境变量：
+#   FRPDESK_VERSION        显式构建版本（可带 v 前缀）；CI 传入 tag 解析结果，
+#                         本地可临时覆盖。未设置时取 git describe（见下）。
 #   UPDATE_MANIFEST_URL     自定义客户端更新主源（stable.json 完整 URL）；设置后注入，
 #                           两项均不设置时禁用更新检查（默认不内置任何地址）。
 #   UPDATE_MIRROR_BASE_URL  可选官方镜像公开根地址（http(s)、无尾斜杠、无空白/引号）；
@@ -21,7 +23,7 @@
 #
 # 产物（bin/）：
 #   frpdesk-darwin-arm64.app  frpdesk-darwin-amd64.app  frpdesk-windows-amd64.exe
-#   （.app 内 Info.plist 版本号由 VERSION 文件在打包时注入）
+#   （.app 内 Info.plist 版本号在打包时由解析出的版本覆盖）
 
 set -euo pipefail
 
@@ -31,8 +33,20 @@ cd "$SCRIPT_DIR"
 
 APP_NAME="frpdesk"
 BIN_DIR="bin"
-# 版本号唯一权威：VERSION 文件（发版时更新该文件）
-VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || true)"
+# 版本号来源（tag-only，不再读取仓库内版本文件）：
+#   FRPDESK_VERSION（可带 v 前缀）> git describe --tags --always --dirty > dev
+VERSION="${FRPDESK_VERSION:-}"
+if [ -z "$VERSION" ]; then
+    VERSION="$(git describe --tags --always --dirty 2>/dev/null || true)"
+fi
+VERSION="${VERSION#v}"
+[ -n "$VERSION" ] || VERSION="dev"
+
+# --print-version：只解析并打印版本号（供 CI/测试/本地查看），不执行任何构建与检查
+if [ "${1:-}" = "--print-version" ]; then
+    printf '%s\n' "$VERSION"
+    exit 0
+fi
 # 与 go.mod 里 wails v3 版本保持一致
 WAILS3_VERSION="v3.0.0-beta.28"
 
@@ -53,8 +67,6 @@ fi
 C_GREEN='\033[0;32m'; C_RED='\033[0;31m'; C_RESET='\033[0m'
 info() { printf "${C_GREEN}[构建]${C_RESET} %s\n" "$*"; }
 err()  { printf "${C_RED}[错误]${C_RESET} %s\n" "$*" >&2; }
-
-[ -n "$VERSION" ] || { err "VERSION 文件缺失或为空"; exit 1; }
 
 # 校验注入地址：防止空白/引号/反斜杠破坏 ldflags 参数
 validate_url() {
@@ -151,14 +163,19 @@ build_darwin() {
 # Windows（纯 Go WebView2，可交叉编译；-H windowsgui 隐藏控制台黑窗）
 build_windows() {
     info "构建 windows/amd64..."
+    # Windows VERSIONINFO 的 fixed 字段要求数字四段：本地 git describe 版本可能带后缀
+    # （如 0.2.12-3-gabc-dirty），取数字三段；取不到时回退 0.0.0；ProductVersion 保留原串
+    local win_version
+    win_version="$(printf '%s' "$VERSION" | sed -nE 's/^v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
+    [ -n "$win_version" ] || win_version="0.0.0"
     # 资源嵌入：exe 图标 + DPI manifest + 版本信息（资源管理器属性面板可见）。
-    # 版本号从 VERSION 注入 info.json，wails3 生成 rsrc_windows_amd64.syso 后
+    # 版本号从解析结果注入 info.json，wails3 生成 rsrc_windows_amd64.syso 后
     # go build 自动链接（仅 GOOS=windows 生效，darwin 构建不受影响）。
     cat > build/windows/info.json <<EOF
 {
   "fixed": {
-    "file_version": "${VERSION}.0",
-    "product_version": "${VERSION}.0"
+    "file_version": "${win_version}.0",
+    "product_version": "${win_version}.0"
   },
   "info": {
     "0409": {

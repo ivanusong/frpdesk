@@ -11,7 +11,7 @@ info:
   description: "frp 穿透客户端" # The application description
   copyright: "(c) 2025, Frpdesk" # Copyright text
   comments: "Frpdesk 桌面客户端" # Comments
-  version: "0.1.0" # 模板占位：实际版本由 VERSION 文件在构建/打包时注入覆盖
+  version: "0.1.0" # 模板占位：实际版本由 build.sh/Taskfile 注入（tag/FRPDESK_VERSION/git describe）覆盖
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
   #                               # Should match the name of your .icon file without the extension
   #                               # If not set and Assets.car exists, defaults to "appicon"

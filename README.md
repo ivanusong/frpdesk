@@ -30,13 +30,17 @@ node scripts/verify-multiserver-ui.mjs   # multi-FRPS UI behavior
 
 ## Release
 
-Push an **annotated** `vX.Y.Z` tag whose version matches `VERSION`. The tag message
-is the release notes — there is no changelog file to maintain. The
-[Release workflow](.github/workflows/release.yml) uses the message (the body when it
-has a subject and a body) for both the GitHub Release description and the Wails
-updater `stable.json` notes shown in-app, then runs the tests, builds the macOS and
-Windows artifacts, and publishes everything as a GitHub Release. A lightweight tag
-or an empty message fails the release before anything is published.
+Push an **annotated** `vX.Y.Z` tag — the tag is the only version source, there is no
+version file or changelog to maintain. The
+[Release workflow](.github/workflows/release.yml) parses the version from the tag,
+uses the tag message (the body when it has a subject and a body) as the release notes
+for both the GitHub Release description and the Wails updater `stable.json` notes
+shown in-app, then runs the tests, builds the macOS and Windows artifacts, and
+publishes everything as a GitHub Release. A lightweight tag or an empty message fails
+the release before anything is published.
+
+Local builds use `git describe --tags --always --dirty` when no explicit version is
+given; set `FRPDESK_VERSION` to override.
 
 ```bash
 git tag -a v0.3.0 -m "Frpdesk v0.3.0

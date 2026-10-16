@@ -30,7 +30,9 @@ node scripts/verify-multiserver-ui.mjs   # 多 Frps UI 行为验证
 
 ## 发布
 
-推送 **annotated** 的 `vX.Y.Z` tag，版本号与 `VERSION` 一致即可。tag 描述就是发布说明，无需维护 changelog 文件：[Release workflow](.github/workflows/release.yml) 用它（含 subject 与 body 时取 body）生成 GitHub Release 描述与 Wails updater `stable.json` 的 notes（即应用内更新提示），随后运行测试、构建 macOS 与 Windows 产物并整体发布为 GitHub Release；轻量 tag 或描述为空会在发布前失败。
+推送 **annotated** 的 `vX.Y.Z` tag——tag 是唯一版本来源，无需维护版本号或 changelog 文件：[Release workflow](.github/workflows/release.yml) 从 tag 解析版本，并用 tag 描述（含 subject 与 body 时取 body）生成 GitHub Release 描述与 Wails updater `stable.json` 的 notes（即应用内更新提示），随后运行测试、构建 macOS 与 Windows 产物并整体发布为 GitHub Release；轻量 tag 或描述为空会在发布前失败。
+
+本地未显式指定版本时使用 `git describe --tags --always --dirty`，可用 `FRPDESK_VERSION` 覆盖。
 
 ```bash
 git tag -a v0.3.0 -m "Frpdesk v0.3.0

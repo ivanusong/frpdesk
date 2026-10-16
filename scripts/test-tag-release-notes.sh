@@ -41,7 +41,7 @@ expect_notes() {
     if [ "$rc" -eq 0 ] && [ "$got" = "$want" ]; then
         ok "$desc"
     else
-        fail "$desc（rc=$rc，got=$(printf '%q' "$got")）"
+        fail "${desc}（rc=${rc}，got=$(printf '%q' "$got")）"
     fi
 }
 
@@ -52,7 +52,7 @@ expect_fail() {
     if [ "$rc" -ne 0 ] && [[ "$err" == *"git tag -a"* ]]; then
         ok "$desc"
     else
-        fail "$desc（rc=$rc，stderr=$(printf '%q' "$err")）"
+        fail "${desc}（rc=${rc}，stderr=$(printf '%q' "$err")）"
     fi
 }
 

@@ -10,9 +10,10 @@ includes:
 vars:
   APP_NAME: 'frpdesk'
   BIN_DIR: 'bin'
-  # 版本唯一权威是 VERSION 文件，每次运行时读取（避免硬编码漂移）
+  # 版本解析统一走 build.sh --print-version：FRPDESK_VERSION > git describe > dev；
+  # tag-only 发版，不再维护仓库内版本文件
   VERSION:
-    sh: cat VERSION
+    sh: bash build.sh --print-version
   GOOS_VALUE: 'darwin'
   GOARCH_VALUE: 'arm64'
   # wails3 dev -port 传入的变量名是 WAILS_VITE_PORT
@@ -40,7 +41,7 @@ tasks:
       - cp -R frontend/bindings frontend/dist/bindings
       - cp -f assets/icon.svg frontend/dist/icon.svg
 
-  # 编译二进制（production tag：资产走 embed 而非 dev server；版本由 VERSION 注入）
+  # 编译二进制（production tag：资产走 embed 而非 dev server；版本由解析结果注入）
   build:
     deps: [build:frontend]
     cmds:
@@ -65,7 +66,7 @@ tasks:
       - cp {{.BIN_DIR}}/{{.APP_NAME}} {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS/
       # 许可证文档必须在签名前复制进 bundle（签名后不可再改 bundle 内容）。
       - bash scripts/stage-license-docs.sh {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources
-      # 版本号注入：官方模板 plist 是占位值，签名前写入真实 VERSION
+      # 版本号注入：官方模板 plist 是占位值，签名前写入解析出的版本
       - plutil -replace CFBundleVersion -string '{{.VERSION}}' {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist
       - plutil -replace CFBundleShortVersionString -string '{{.VERSION}}' {{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist
       - xattr -cr {{.BIN_DIR}}/{{.APP_NAME}}.app

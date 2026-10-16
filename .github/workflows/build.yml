@@ -1,6 +1,7 @@
 # 构建工作流：在单台 macOS（Apple Silicon）Runner 上测试并打包三目标产物
 # （darwin arm64/amd64 + windows amd64），只上传 Actions 构建附件。
 # 前端零 npm，行为验证使用 Runner 自带 Node 运行零依赖脚本。
+# 构建版本由 build.sh 解析（FRPDESK_VERSION > git describe > dev），不读取版本文件。
 name: Build
 
 on:
@@ -52,16 +53,22 @@ jobs:
       - name: 双语词典校验（零依赖 Node 脚本）
         run: node scripts/verify-i18n.mjs
 
-      - name: 三目标构建（复用 build.sh）
-        run: bash build.sh
+      - name: 解析构建版本（FRPDESK_VERSION 优先，否则 git describe/短 SHA 兜底）
+        run: |
+          set -euo pipefail
+          version="$(bash build.sh --print-version)"
+          [ -n "$version" ] || { echo "版本解析为空"; exit 1; }
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "[build] 构建版本：${version}"
 
-      - name: 打包附件（按 VERSION 命名，ditto 保留 .app 可执行权限）
+      - name: 三目标构建（复用 build.sh，注入解析出的版本）
+        run: FRPDESK_VERSION="${VERSION}" bash build.sh
+
+      - name: 打包附件（按解析版本命名，ditto 保留 .app 可执行权限）
         id: package
         run: |
           set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION)"
-          [ -n "$VERSION" ] || { echo "VERSION 文件缺失或为空"; exit 1; }
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-arm64.app" "bin/frpdesk-${VERSION}-darwin-arm64.zip"
           ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-amd64.app" "bin/frpdesk-${VERSION}-darwin-amd64.zip"
           cp "bin/frpdesk-windows-amd64.exe" "bin/frpdesk-${VERSION}-windows-amd64.exe"
@@ -70,7 +77,6 @@ jobs:
       - name: 打包许可文档附件（单独随 Windows EXE 分发）
         run: |
           set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION)"
           bash scripts/stage-license-docs.sh "bin/frpdesk-${VERSION}-licenses"
           ditto -c -k --norsrc "bin/frpdesk-${VERSION}-licenses" "bin/frpdesk-${VERSION}-licenses.zip"
           rm -rf "bin/frpdesk-${VERSION}-licenses"
