@@ -56,7 +56,7 @@ expect_fail() {
     fi
 }
 
-git tag -a v-body -m $'frpdesk v0.2.12\n\n- 新增：多行描述\n- 修复：列表保留'
+git tag -a v-body -m $'Frpdesk v0.2.12\n\n- 新增：多行描述\n- 修复：列表保留'
 expect_notes "subject + body 时取 body 且保留多行列表" v-body $'- 新增：多行描述\n- 修复：列表保留'
 
 git tag -a v-subject -m '仅 subject 的描述'

@@ -73,7 +73,7 @@ func connectedTunnelCount(cfg configstore.Config, serverStatuses []configstore.S
 // 输入为多服务器聚合状态（counts 由 AggregateStatus 派生）。
 // 服务器生命周期由 Service.Enabled 自动驱动，托盘无手动启停项。
 type trayStatusView struct {
-	StateText  string // 首行「frpdesk · 」后的状态文字
+	StateText  string // 首行「Frpdesk · 」后的状态文字
 	ShowReason bool   // 是否显示失败原因行
 	Failed     bool   // 是否使用带感叹号徽标的故障图标
 }
@@ -105,10 +105,10 @@ type trayController struct {
 	window *application.WebviewWindow
 	tray   *application.SystemTray
 
-	statusItem *application.MenuItem // 「frpdesk · 状态」不可点行（聚合：已连接 N/M 等）
+	statusItem *application.MenuItem // 「Frpdesk · 状态」不可点行（聚合：已连接 N/M 等）
 	reasonItem *application.MenuItem // 失败原因不可点行（按需显示）
 	showItem   *application.MenuItem // 「显示主窗口」
-	quitItem   *application.MenuItem // 「退出 frpdesk」
+	quitItem   *application.MenuItem // 「退出 Frpdesk」
 
 	// lastStatus/lastCount：最近一次状态渲染输入，切语言后原样重渲染（菜单文案随语言变）
 	lastStatus  configstore.TunnelStatus
@@ -124,7 +124,7 @@ func newTrayController(app *application.App, window *application.WebviewWindow, 
 	t := &trayController{svc: svc, app: app, window: window}
 
 	menu := app.Menu.New()
-	t.statusItem = menu.Add("frpdesk · " + i18n.T(i18n.KeyStateStopped)).SetEnabled(false)
+	t.statusItem = menu.Add("Frpdesk · " + i18n.T(i18n.KeyStateStopped)).SetEnabled(false)
 	t.reasonItem = menu.Add("").SetEnabled(false)
 	t.reasonItem.SetHidden(true)
 	menu.AddSeparator()
@@ -245,7 +245,7 @@ func (t *trayController) updateStatus() {
 func (t *trayController) applyStatus(s configstore.TunnelStatus, connectedTunnels int) {
 	t.lastStatus, t.lastCount, t.hasLastView = s, connectedTunnels, true
 	v := trayViewFor(s, connectedTunnels)
-	t.statusItem.SetLabel("frpdesk · " + v.StateText)
+	t.statusItem.SetLabel("Frpdesk · " + v.StateText)
 	// 托盘菜单宽度有限：失败原因单行化 + 截断（完整原文在环形日志与前端 title）
 	t.reasonItem.SetLabel(configstore.BriefMessage(s.Message, 60))
 	t.reasonItem.SetHidden(!v.ShowReason)
@@ -280,7 +280,7 @@ func (t *trayController) applyLanguage() {
 		if t.hasLastView {
 			t.applyStatus(t.lastStatus, t.lastCount)
 		} else {
-			t.statusItem.SetLabel("frpdesk · " + i18n.T(i18n.KeyStateStopped))
+			t.statusItem.SetLabel("Frpdesk · " + i18n.T(i18n.KeyStateStopped))
 		}
 	})
 }

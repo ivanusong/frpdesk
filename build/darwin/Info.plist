@@ -4,7 +4,7 @@
         <key>CFBundlePackageType</key>
             <string>APPL</string>
         <key>CFBundleName</key>
-            <string>frpdesk</string>
+            <string>Frpdesk</string>
         <key>CFBundleExecutable</key>
             <string>frpdesk</string>
         <key>CFBundleIdentifier</key>
@@ -22,6 +22,6 @@
         <key>NSHighResolutionCapable</key>
             <string>true</string>
         <key>NSHumanReadableCopyright</key>
-            <string>© 2025, frpdesk</string>
+            <string>© 2025, Frpdesk</string>
     </dict>
 </plist>

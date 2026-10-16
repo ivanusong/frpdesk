@@ -105,7 +105,7 @@ jobs:
           wails3 updater manifest \
             -version "${VERSION}" \
             -channel stable \
-            -name "frpdesk v${VERSION}" \
+            -name "Frpdesk v${VERSION}" \
             -url-prefix "${DOWNLOAD_BASE_URL}/v${VERSION}/" \
             -notes-file release-notes.md \
             -output bin/stable.json \
@@ -126,7 +126,7 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --draft \
-            --title "frpdesk v${VERSION}" \
+            --title "Frpdesk v${VERSION}" \
             --notes-file release-notes.md
           gh release upload "v${VERSION}" \
             --repo "${GITHUB_REPOSITORY}" \

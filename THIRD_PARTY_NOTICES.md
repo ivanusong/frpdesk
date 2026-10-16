@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-frpdesk is licensed under the [Apache License 2.0](LICENSE). The third-party
+Frpdesk is licensed under the [Apache License 2.0](LICENSE). The third-party
 components listed below keep their own licenses; full license texts are in
 [`licenses/`](licenses/).
 

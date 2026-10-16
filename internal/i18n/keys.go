@@ -26,8 +26,8 @@ var dict = map[string]entry{
 
 	// ---- 托盘 ----
 	KeyTrayShow:    {"显示主窗口", "Show Main Window"},
-	KeyTrayQuit:    {"退出 frpdesk", "Quit frpdesk"},
-	KeyTrayTooltip: {"frpdesk 托盘", "frpdesk tray"},
+	KeyTrayQuit:    {"退出 Frpdesk", "Quit Frpdesk"},
+	KeyTrayTooltip: {"Frpdesk 托盘", "Frpdesk tray"},
 
 	// ---- 聚合/托盘状态 ----
 	KeyStateStopped:  {"已停止", "Stopped"},

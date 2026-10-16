@@ -2,7 +2,7 @@
 
 # Frpdesk
 
-frpdesk is a native desktop client for [frp](https://github.com/fatedier/frp), built with [Wails v3](https://v3.wails.io). The frp client runs directly inside the app, with no sidecar process.
+Frpdesk is a native desktop client for [frp](https://github.com/fatedier/frp), built with [Wails v3](https://v3.wails.io). The frp client runs directly inside the app, with no sidecar process.
 
 ## Features
 
@@ -39,7 +39,7 @@ Windows artifacts, and publishes everything as a GitHub Release. A lightweight t
 or an empty message fails the release before anything is published.
 
 ```bash
-git tag -a v0.3.0 -m "frpdesk v0.3.0
+git tag -a v0.3.0 -m "Frpdesk v0.3.0
 
 - What changed in this release
 - A few lines are enough"

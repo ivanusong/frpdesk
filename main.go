@@ -27,7 +27,7 @@ func main() {
 	appService := NewAppService()
 
 	app := application.New(application.Options{
-		Name:        "frpdesk",
+		Name:        "Frpdesk",
 		Description: i18n.T(i18n.KeyAppDescription),
 		Services: []application.Service{
 			application.NewService(appService),
@@ -52,7 +52,7 @@ func main() {
 	})
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:     "frpdesk",
+		Title:     "Frpdesk",
 		Width:     780,
 		Height:    600, // 顶栏合并为单条后回收一行高度
 		MinWidth:  680,

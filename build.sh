@@ -162,9 +162,9 @@ build_windows() {
   },
   "info": {
     "0409": {
-      "CompanyName": "frpdesk",
+      "CompanyName": "Frpdesk",
       "FileDescription": "frp 穿透客户端",
-      "ProductName": "frpdesk",
+      "ProductName": "Frpdesk",
       "ProductVersion": "${VERSION}"
     }
   }

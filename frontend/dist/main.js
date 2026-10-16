@@ -1973,13 +1973,13 @@ function renderCheckButton() {
   btn.title = state.updateChecking ? t("update.checking") : busyUpdate ? t("update.busy") : t("update.check");
 }
 
-// renderUpdate：顶栏展示「frpdesk 当前版本」；更新 chip 可见性以 latestVersion +
+// renderUpdate：顶栏展示「Frpdesk 当前版本」；更新 chip 可见性以 latestVersion +
 // 可安装状态为准（available/ready/error 可点，busy 可见禁点，其余隐藏）。
 // chip 状态不变时只改文字，避免重建 DOM 打断 spinner 旋转动画。
 function renderUpdate() {
   const info = state.update.info;
   const chip = $("btn-update-apply");
-  if (info?.currentVersion) $("app-version").textContent = `frpdesk ${info.currentVersion}`;
+  if (info?.currentVersion) $("app-version").textContent = `Frpdesk ${info.currentVersion}`;
   const st = info?.state;
   const busy = UPDATE_BUSY_STATES.has(st);
   const visible = Boolean(info?.latestVersion) && (busy || st === "available" || st === "ready" || st === "error");

@@ -2,7 +2,7 @@
 
 # Frpdesk
 
-frpdesk 是 [frp](https://github.com/fatedier/frp) 的原生桌面客户端，基于 [Wails v3](https://v3.wails.io) 构建。frp 客户端直接运行在应用内，没有独立 sidecar 进程。
+Frpdesk 是 [frp](https://github.com/fatedier/frp) 的原生桌面客户端，基于 [Wails v3](https://v3.wails.io) 构建。frp 客户端直接运行在应用内，没有独立 sidecar 进程。
 
 ## 功能
 
@@ -33,7 +33,7 @@ node scripts/verify-multiserver-ui.mjs   # 多 Frps UI 行为验证
 推送 **annotated** 的 `vX.Y.Z` tag，版本号与 `VERSION` 一致即可。tag 描述就是发布说明，无需维护 changelog 文件：[Release workflow](.github/workflows/release.yml) 用它（含 subject 与 body 时取 body）生成 GitHub Release 描述与 Wails updater `stable.json` 的 notes（即应用内更新提示），随后运行测试、构建 macOS 与 Windows 产物并整体发布为 GitHub Release；轻量 tag 或描述为空会在发布前失败。
 
 ```bash
-git tag -a v0.3.0 -m "frpdesk v0.3.0
+git tag -a v0.3.0 -m "Frpdesk v0.3.0
 
 - 本次改动要点
 - 几行即可"
