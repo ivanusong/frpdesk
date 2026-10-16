@@ -19,7 +19,7 @@ permissions:
 jobs:
   build:
     name: 测试与三目标构建
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: 检出代码
         uses: actions/checkout@v4

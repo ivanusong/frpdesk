@@ -20,7 +20,7 @@ permissions:
 jobs:
   release:
     name: 版本校验、三目标构建与发布
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -172,7 +172,7 @@ jobs:
     if: ${{ needs.release.result == 'success' && (vars.UPDATE_MIRROR_BASE_URL != '' || vars.MIRROR_S3_ENDPOINT != '' || vars.MIRROR_S3_BUCKET != '') }}
     permissions:
       contents: read
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
