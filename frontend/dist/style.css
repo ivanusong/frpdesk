@@ -645,6 +645,28 @@ html[data-no-mac] .titlebar {
   min-width: 0; /* 窄窗下防输入控件默认最小宽把行撑出弹窗 */
 }
 
+/* 端口服务行：服务名称与协议同行，比例 3:1；
+   HTTP 时协议 label 带 hidden 属性，名称回退为独占整行 */
+.service-name-proto-row {
+  display: grid;
+  grid-template-columns: 3fr 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.service-name-proto-row > label {
+  min-width: 0;
+}
+
+/* [data-fields] 的 12px 组间距针对整组字段；单控件 label 保持 5px 上下间距 */
+.service-name-proto-row > label[data-fields="proto"] {
+  gap: 5px;
+}
+
+.service-name-proto-row:has(> label[data-fields="proto"][hidden]) {
+  grid-template-columns: 1fr;
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-end;

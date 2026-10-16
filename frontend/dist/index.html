@@ -197,8 +197,13 @@
         <form id="service-form" class="form">
           <!-- 服务类型：HTTP 由入口决定不可切换；端口服务（TCP/UDP）在弹窗内可选，默认 TCP -->
           <input type="hidden" name="type" value="http" />
-          <div class="form-row" data-fields="proto" hidden>
+          <!-- 服务名称 + 协议同一行（3:1）；协议 label 保留 data-fields="proto" 供 setServiceType 切显隐 -->
+          <div class="form-row service-name-proto-row">
             <label>
+              <span data-i18n="form.svcName">服务名称</span>
+              <input name="name" type="text" autocomplete="off" data-i18n-placeholder="form.svcNamePh" placeholder="例如：本地博客" required />
+            </label>
+            <label data-fields="proto" hidden>
               <span data-i18n="form.proto">协议</span>
               <div class="select-wrap select-inline">
                 <select name="proto" id="svc-proto-select">
@@ -208,10 +213,6 @@
               </div>
             </label>
           </div>
-          <label>
-            <span data-i18n="form.svcName">服务名称</span>
-            <input name="name" type="text" autocomplete="off" data-i18n-placeholder="form.svcNamePh" placeholder="例如：本地博客" required />
-          </label>
           <div class="form-row">
             <label>
               <span data-i18n="form.localIP">本地 IP</span>
