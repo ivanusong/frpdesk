@@ -25,10 +25,17 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
-          # 浅克隆会把 tag ref 解析到 commit，导致 annotated tag 被误判为轻量 tag。
-          # 发布流程需要完整 tag object 来读取版本说明。
+          # checkout 会用 SHA 精确 refetch tag，把 tag ref 变成 commit；
+          # 先检 main，再单独 fetch annotated tag object 供脚本读取描述。
+          ref: refs/heads/main
           fetch-depth: 0
-          fetch-tags: true
+
+      - name: 拉取 annotated tag object
+        # checkout 的 SHA 精确 refetch 会覆盖 tag ref；用 refspec 重新写入 tag object。
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = "tag"
 
       - name: 解析 tag 版本（唯一版本来源）
         # tag-only 发版：版本只从 annotated tag 解析，仓库内不再维护版本文件
