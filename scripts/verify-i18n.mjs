@@ -148,10 +148,59 @@ check(
   "日志归属固定 System（渲染不用词典 key）",
   mainSrc.includes('e.serverName || "System"') && !mainSrc.includes('t("log.system")'),
 );
-// 语言按钮两态契约：按当前生效语言取反切换，不再有 system/zh/en 三态循环
+// 语言入口契约：图标按钮 + 三选一菜单（system/zh-CN/en，允许回到自动），无两态取反切换
+const langPrefs = [...html.matchAll(/data-lang-pref="([^"]+)"/g)].map((m) => m[1]);
 check(
-  "语言按钮为中/EN 两态切换（无三态循环）",
-  mainSrc.includes('currentLang() === "zh-CN" ? "en" : "zh-CN"') && !mainSrc.includes("LANG_ORDER"),
+  "语言入口为图标按钮 + 三选一菜单（system/zh-CN/en，可回到自动）",
+  html.includes('id="lang-menu"') &&
+    html.includes('aria-haspopup="menu"') &&
+    html.includes('role="menuitemradio"') &&
+    langPrefs.join(",") === "system,zh-CN,en" &&
+    mainSrc.includes("setLanguagePref(opt.dataset.langPref)") &&
+    !mainSrc.includes('currentLang() === "zh-CN" ? "en" : "zh-CN"') &&
+    !mainSrc.includes("LANG_ORDER"),
+  `prefs=${langPrefs.join(",")}`,
+);
+// 语言按钮保持静态图标：切语言只刷新 title/aria，不重写按钮内容（SVG 不变体）
+check(
+  "语言按钮为静态图标（切语言不重写按钮文本/图标）",
+  html.includes('id="btn-lang"') &&
+    html.includes('aria-haspopup="menu"') &&
+    !mainSrc.includes('$("btn-lang").textContent') &&
+    !mainSrc.includes('$("btn-lang").innerHTML'),
+);
+
+// 语言菜单为三行纯语言名：无 code 括号、无「跟随系统」后缀、无 system 副文本节点/key
+check(
+  "语言菜单为三行纯语言名（自动/简体中文/英语，无 code 与后缀）",
+  DICT["lang.optionSystem"]?.zh === "自动" &&
+    DICT["lang.optionSystem"]?.en === "Auto" &&
+    DICT["lang.optionZh"]?.zh === "简体中文" &&
+    DICT["lang.optionZh"]?.en === "Simplified Chinese" &&
+    DICT["lang.optionEn"]?.zh === "英语" &&
+    DICT["lang.optionEn"]?.en === "English" &&
+    !("lang.systemResolved" in DICT) &&
+    !html.includes("lang-system-note"),
+);
+
+// ---------- 9) README：语言内容彻底移除（双语说明/互链/verify-i18n 命令均不再出现） ----------
+const readmeEn = readFileSync(join(ROOT, "README.md"), "utf8");
+const readmeZh = readFileSync(join(ROOT, "README_zh-CN.md"), "utf8");
+check(
+  "README 不含语言/翻译内容（界面语言、双语 UI 行、UI language、Translation contributions）",
+  !readmeEn.includes("UI language") &&
+    !readmeEn.includes("Translation contributions") &&
+    !readmeEn.includes("Simplified Chinese / English UI") &&
+    !readmeZh.includes("界面语言") &&
+    !readmeZh.includes("贡献翻译") &&
+    !readmeZh.includes("简体中文 / 英文界面"),
+);
+check(
+  "README 不再有双语 README 互链与 verify-i18n 命令",
+  !readmeEn.includes("README_zh-CN.md") &&
+    !readmeZh.includes("[English](README.md)") &&
+    !readmeEn.includes("verify-i18n") &&
+    !readmeZh.includes("verify-i18n"),
 );
 
 // ---------- 汇总 ----------

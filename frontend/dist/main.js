@@ -1,6 +1,6 @@
 // frpdesk 前端逻辑：纯原生 JS。bindings 调后端，Events 订阅推送。
 import * as api from "./bindings/frpdesk/index.js";
-import { t, tEn, applyPref, currentLang, normalizePref, normalizeLang, readStoredPref, resolveLang } from "./i18n.js";
+import { t, tEn, applyPref, currentLang, currentPref, normalizePref, normalizeLang, readStoredPref, resolveLang } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -220,13 +220,13 @@ function briefText(s, n) {
   return chars.length > n ? chars.slice(0, n).join("") + "…" : s;
 }
 
-// ---------- 语言（首启无偏好由 system 自动解析；按钮为中/EN 两态显式切换）----------
+// ---------- 语言（首启无偏好由 system 自动解析；顶栏图标按钮打开三选一菜单）----------
 
 // 语言偏好与主题同一模式：本地先应用（首帧正确），选择变化同步后端（托盘/后端消息语言）。
 // 后端 config.json + 快照的 resolved language 为权威：system 模式不做前端独立判定，
 // 统一采用后端探测结果，避免 WebView 与原生托盘语言不一致。
-// 交互约定：首次/无偏好（system）自动跟随系统语言；语言按钮只在 zh-CN ⇄ en
-// 两个显式语言间切换并持久化，不会回到 system（后端 system 能力保留，快照对齐不变）。
+// 交互约定：顶栏语言图标打开小型菜单，三选一：自动（system）/ 简体中文（zh-CN）/
+// 英语（en）；选择立即生效并持久化，选「自动」可随时回到跟随系统。
 
 // langSync：语言写入串行/去重与确认状态。
 //   seq：用户每次改动的序号；链上任务执行前/结果返回后都校验，只有最新一次生效
@@ -239,14 +239,69 @@ const langSync = {
   confirmed: null,
 };
 
-// renderLangButton：语言按钮显示当前生效语言的紧凑可见状态（中/EN），
-// tip/aria 明确当前语言与点击后将切换到的语言
+// 语言选项标签的词典 key（菜单项、按钮 title 共用）
+const LANG_LABEL_KEY = { system: "lang.optionSystem", "zh-CN": "lang.optionZh", en: "lang.optionEn" };
+
+// langLabel：偏好 → 当前语言下的人类可读名称（自动 / 简体中文 / 英语）
+function langLabel(pref) {
+  return t(LANG_LABEL_KEY[normalizePref(pref)] ?? LANG_LABEL_KEY.system);
+}
+
+// langMenuOpen：菜单开合状态（与 iconPopoverOpen 同模式：外部点击/Escape 关闭）
+let langMenuOpen = false;
+let langMenuCloseTimer = null; // 退场隐藏定时器：快速重开时取消，避免把刚打开的菜单又藏掉
+
+// renderLangButton：语言按钮为静态图标（语言切换不重绘，图标始终不变），
+// title 提示当前偏好、aria 说明用途、aria-expanded 反映菜单开合。
 function renderLangButton() {
   const btn = $("btn-lang");
   if (!btn) return;
-  btn.textContent = currentLang() === "zh-CN" ? "中" : "EN";
-  btn.title = t("lang.title");
+  btn.title = t("lang.title", langLabel(currentPref()));
   btn.setAttribute("aria-label", t("lang.aria"));
+  btn.setAttribute("aria-expanded", String(langMenuOpen));
+}
+
+// renderLangMenu：菜单项选中态（当前 pref 高亮 + aria-checked）。菜单仅三行纯语言名，
+// 当前配置只由选中态表达；applyLanguage 每次都会调用，语言切换时菜单若打开则按
+// 新语言重绘、选中项不丢（选项文案由 applyStaticI18n 的 data-i18n 统一刷新）。
+function renderLangMenu() {
+  const menu = $("lang-menu");
+  if (!menu) return;
+  const cur = currentPref();
+  for (const opt of menu.querySelectorAll(".lang-option")) {
+    const on = normalizePref(opt.dataset.langPref) === cur;
+    opt.classList.toggle("is-active", on);
+    opt.setAttribute("aria-checked", String(on));
+  }
+}
+
+// openLangMenu / closeLangMenu：开关弹层。关闭走 140ms 退场过渡；返回值供
+// Escape 分流（先关菜单再处理其余 Escape 行为）。
+function openLangMenu() {
+  if (langMenuOpen) return;
+  const menu = $("lang-menu");
+  if (!menu) return;
+  renderLangMenu(); // 打开即定位当前选中项
+  clearTimeout(langMenuCloseTimer);
+  langMenuCloseTimer = null;
+  menu.hidden = false;
+  void menu.offsetHeight; // 提交初始态后再过渡（与图标 popover 一致）
+  menu.classList.add("is-open");
+  langMenuOpen = true;
+  $("btn-lang").setAttribute("aria-expanded", "true");
+}
+
+function closeLangMenu() {
+  if (!langMenuOpen) return false;
+  langMenuOpen = false;
+  const menu = $("lang-menu");
+  menu.classList.remove("is-open");
+  clearTimeout(langMenuCloseTimer);
+  langMenuCloseTimer = setTimeout(() => {
+    menu.hidden = true;
+  }, 160);
+  $("btn-lang").setAttribute("aria-expanded", "false");
+  return true;
 }
 
 // applyStaticI18n：静态 data 属性文案（text/title/aria-label/placeholder）
@@ -286,6 +341,7 @@ function applyLanguage() {
   positionTabSlider(true); // Tab 文案宽度随语言变化，指示条需立即按新尺寸测量
   applyTheme(document.documentElement.dataset.theme ?? "system", false);
   renderLangButton();
+  renderLangMenu();
   if (state.snapshot) {
     renderSnapshot(state.snapshot);
   }
@@ -302,6 +358,7 @@ function initLanguage() {
   applyPref(readStoredPref(), { persist: false });
   applyStaticI18n();
   renderLangButton();
+  renderLangMenu();
 }
 
 // reconcileLanguageFromSnapshot：启动快照对齐（后端权威）。
@@ -438,11 +495,6 @@ function initTheme() {
     const order = ["system", "light", "dark"];
     const cur = document.documentElement.dataset.theme ?? "system";
     applyTheme(order[(order.indexOf(cur) + 1) % order.length]);
-  });
-  // 语言按钮：中/EN 两态显式切换（按当前生效语言取反）；点击只持久化显式
-  // 偏好（zh-CN/en），不回到 system；首启未选择时仍由后端 system 权威解析
-  $("btn-lang").addEventListener("click", () => {
-    setLanguagePref(currentLang() === "zh-CN" ? "en" : "zh-CN");
   });
 }
 
@@ -2115,9 +2167,13 @@ function bindEvents() {
   document
     .querySelectorAll("[data-close-qr]")
     .forEach((el) => el.addEventListener("click", closeQrModal));
-  // Escape：popover 优先关闭，再各模态（互斥，不会同时打开）
+  // Escape：语言菜单/图标 popover 优先关闭，再各模态（互斥，不会同时打开）
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (closeLangMenu()) {
+      $("btn-lang").focus(); // 键盘关闭后焦点回到触发按钮
+      return;
+    }
     if (closeIconPopover()) return;
     if (!$("service-modal").hidden) closeServiceModal();
     else if (!$("server-modal").hidden) closeServerModal();
@@ -2168,6 +2224,20 @@ function bindEvents() {
   // 弹窗内协议切换（TCP/UDP）：驱动字段组/图标兜底/地址预览刷新，并保留本次已选目标
   $("svc-proto-select").addEventListener("change", (e) => setServiceType(e.target.value, { preserveServer: true }));
   document.querySelectorAll("[data-close-modal]").forEach((el) => el.addEventListener("click", closeServiceModal));
+  // 语言菜单：图标按钮开关弹层；选项点选即应用并关闭（system 允许回到自动）；
+  // 语言切换不丢菜单状态：applyLanguage 重绘选项文案与选中项
+  $("btn-lang").addEventListener("click", () => (langMenuOpen ? closeLangMenu() : openLangMenu()));
+  $("lang-menu").addEventListener("click", (e) => {
+    const opt = e.target.closest(".lang-option");
+    if (!opt) return;
+    closeLangMenu();
+    setLanguagePref(opt.dataset.langPref);
+  });
+  // 点击菜单外部关闭（.lang-pick-wrap 内的点击由按钮/选项自身逻辑处理）
+  document.addEventListener("pointerdown", (e) => {
+    if (langMenuOpen && !e.target.closest(".lang-pick-wrap")) closeLangMenu();
+  });
+
   // 图标选择器：触发按钮开关 popover；网格点选即选中并关闭；随机/清除保持打开便于连续调整
   $("btn-icon-pick").addEventListener("click", () => (iconPopoverOpen ? closeIconPopover() : openIconPopover()));
   $("icon-grid").addEventListener("click", (e) => {

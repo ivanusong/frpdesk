@@ -27,6 +27,8 @@ let rejections = 0;
 process.on("unhandledRejection", (e) => { rejections++; console.error("[unhandledRejection]", e && (e.stack || e.message || e)); });
 
 const VOID = new Set(["input", "br", "img", "meta", "link", "hr", "source"]);
+// dataset 驼峰 ↔ data- 连字符属性名（与真实 DOM 一致：dataset.i18nTitle ↔ data-i18n-title）
+const dataAttr = (k) => "data-" + String(k).replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()).replaceAll("_", "-");
 
 class El {
   constructor(tag, parent) {
@@ -36,9 +38,9 @@ class El {
     this.attrs = {};
     this.handlers = {};
     this.dataset = new Proxy({}, {
-      get: (_t, k) => this.attrs["data-" + String(k).replaceAll("_", "-")],
-      set: (_t, k, v) => ((this.attrs["data-" + String(k).replaceAll("_", "-")] = String(v)), true),
-      deleteProperty: (_t, k) => (delete this.attrs["data-" + String(k).replaceAll("_", "-")], true),
+      get: (_t, k) => this.attrs[dataAttr(k)],
+      set: (_t, k, v) => ((this.attrs[dataAttr(k)] = String(v)), true),
+      deleteProperty: (_t, k) => (delete this.attrs[dataAttr(k)], true),
     });
     this.style = {};
     this._class = new Set();
@@ -1026,12 +1028,30 @@ const bizCount = () => appStub.calls.filter((c) => ["SetServiceEnabled", "Create
 check("S10 初始：偏好 zh-CN 且 html lang=zh-CN", storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN", String(document.documentElement.lang));
 const tabTunnels = document.querySelector('.tab[data-tab="tunnels"]');
 const langBtn = () => document.getElementById("btn-lang");
+const langMenu = () => document.getElementById("lang-menu");
+const langOption = (p) => langMenu().querySelector(`.lang-option[data-lang-pref="${p}"]`);
+const langIconHTML = () => langBtn().querySelector("svg.icon")?.serialize() ?? "";
 const langSlider = document.getElementById("tab-slider");
 tabTunnels.offsetWidth = 88;
 tabTunnels.offsetLeft = 12;
 langSlider.style.width = "40px";
 langSlider.style.left = "10px";
-check("S10 初始：静态 Tab 为中文且语言按钮为紧凑「中」态", tabTunnels.textContent === "隧道" && langBtn().textContent === "中" && (langBtn().title || "").includes("语言：中文") && (langBtn().title || "").includes("切换到 English"), langBtn().title);
+check(
+  "S10 初始：静态 Tab 为中文且语言入口为图标按钮（无文字态）",
+  tabTunnels.textContent === "隧道" &&
+    Boolean(langBtn().querySelector("svg.icon")) &&
+    langBtn().textContent.trim() === "" &&
+    (langBtn().title || "").includes("界面语言：简体中文") &&
+    langBtn().getAttribute("aria-label") === "选择界面语言" &&
+    langBtn().getAttribute("aria-expanded") === "false" &&
+    langOption("zh-CN").getAttribute("aria-checked") === "true" &&
+    langOption("system").getAttribute("aria-checked") === "false" &&
+    langOption("system").textContent === "自动" &&
+    langOption("zh-CN").textContent === "简体中文" &&
+    langOption("en").textContent === "英语",
+  `${langBtn().textContent} / ${langBtn().title} / ${langBtn().getAttribute("aria-label")}`,
+);
+const langIconBefore = langIconHTML();
 
 // 记录切换前业务调用数：切语言绝不能触发隧道/服务 RPC
 const bizBefore = bizCount();
@@ -1039,7 +1059,15 @@ const bizBefore = bizCount();
 await T.setLanguagePref("en");
 check("S10 切英文：Tab 指示条按新文案重新定位", langSlider.style.width === "64px" && langSlider.style.left === "24px", `${langSlider.style.width} / ${langSlider.style.left}`);
 check("S10 切英文：html lang 与 localStorage 持久化", document.documentElement.lang === "en" && storage.get("frpdesk.language") === "en");
-check("S10 切英文：语言按钮为「EN」态且 tip/aria 指向切回中文", langBtn().textContent === "EN" && (langBtn().title || "").includes("Language: English") && (langBtn().getAttribute("aria-label") || "").includes("switch to 中文"), `${langBtn().textContent} / ${langBtn().title} / ${langBtn().getAttribute("aria-label")}`);
+check(
+  "S10 切英文：语言入口图标不变、tip/aria 随语言刷新",
+  Boolean(langBtn().querySelector("svg.icon")) &&
+    langIconHTML() === langIconBefore &&
+    langBtn().textContent.trim() === "" &&
+    (langBtn().title || "").includes("Interface language: English") &&
+    langBtn().getAttribute("aria-label") === "Choose interface language",
+  `${langBtn().textContent} / ${langBtn().title} / ${langBtn().getAttribute("aria-label")}`,
+);
 check("S10 切英文：静态文案（Tab/按钮/空态属性）", tabTunnels.textContent === "Tunnels" && document.getElementById("btn-add-http").textContent.includes("Add HTTP") && document.getElementById("service-empty").textContent.includes("No tunnels yet"));
 check("S10 切英文：动态状态栏", document.getElementById("status-label").textContent === "Connected" && document.getElementById("service-count").title === "Currently mapped tunnels", `${document.getElementById("status-label").textContent} / ${document.getElementById("service-count").title}`);
 check("S10 切英文：动态卡片操作/徽章", document.querySelector("#service-list .service-item .svc-op--r1")?.getAttribute("title") === "Edit" && document.querySelector("#service-list .service-item .tag-ok")?.textContent === "Registered", `${document.querySelector("#service-list .service-item .svc-op--r1")?.getAttribute("title")} / ${document.querySelector("#service-list .service-item .tag")?.textContent}`);
@@ -1047,38 +1075,91 @@ check("S10 切英文：服务器卡操作文案", document.querySelector('#serve
 check("S10 切英文：后端同步 SetLanguage(en)", appStub.calls.filter((c) => c.name === "SetLanguage").at(-1)?.args?.[0] === "en");
 check("S10 切英文：不触发任何隧道/配置业务调用", bizCount() === bizBefore);
 
-// 语言按钮：中/EN 两态显式切换（zh-CN ⇄ en），不再有三态循环、不会回到 system
+// 语言菜单：图标按钮打开三选一菜单；当前 pref 高亮，点选后应用并关闭
 langBtn().click();
+check(
+  "S10 菜单：点击图标打开三选项菜单（当前 pref 选中）",
+  langMenu().classList.contains("is-open") &&
+    langBtn().getAttribute("aria-expanded") === "true" &&
+    langMenu().hidden === false &&
+    langMenu().querySelectorAll(".lang-option").length === 3 &&
+    langMenu().getAttribute("aria-label") === "Choose interface language" &&
+    langOption("system").textContent === "Auto" &&
+    langOption("zh-CN").textContent === "Simplified Chinese" &&
+    langOption("en").textContent === "English" &&
+    langOption("en").getAttribute("aria-checked") === "true" &&
+    langOption("zh-CN").getAttribute("aria-checked") === "false" &&
+    langOption("system").getAttribute("aria-checked") === "false",
+  `options=${langMenu().querySelectorAll(".lang-option").length} checked=${langOption("en").getAttribute("aria-checked")}`,
+);
+// 菜单打开期间切语言：菜单保持打开，选项文案与选中项随新语言重绘
+await T.setLanguagePref("zh-CN");
+check(
+  "S10 菜单：切换语言期间保持打开并重绘选中项/文案",
+  langMenu().classList.contains("is-open") &&
+    langOption("zh-CN").getAttribute("aria-checked") === "true" &&
+    langOption("en").getAttribute("aria-checked") === "false" &&
+    langOption("system").textContent === "自动" &&
+    langOption("zh-CN").textContent === "简体中文" &&
+    langOption("en").textContent === "英语",
+  `${langOption("system").textContent} / ${langOption("en").textContent}`,
+);
+// 选项点选 en：持久化 + 界面切换 + 菜单关闭
+langOption("en").click();
 await sleep(20);
 check(
-  "S10 按钮两态：en → zh-CN（持久化显式偏好）",
-  storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN" && tabTunnels.textContent === "隧道" && langBtn().textContent === "中",
-  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang} btn=${langBtn().textContent}`,
+  "S10 菜单：点选 en 持久化、切界面并关闭菜单",
+  storage.get("frpdesk.language") === "en" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels" && !langMenu().classList.contains("is-open") && langBtn().getAttribute("aria-expanded") === "false",
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`,
 );
+// 选项点选 system：允许回到自动，界面语言由后端 resolved 决定
+appStub.langSystemResolved = "zh-CN";
 langBtn().click();
+langOption("system").click();
 await sleep(20);
 check(
-  "S10 按钮两态：zh-CN → en（不回到 system）",
-  storage.get("frpdesk.language") === "en" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels" && langBtn().textContent === "EN",
-  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang} btn=${langBtn().textContent}`,
+  "S10 菜单：点选 system 回到自动（后端 resolved 决定界面）",
+  storage.get("frpdesk.language") === "system" && document.documentElement.lang === "zh-CN" && tabTunnels.textContent === "隧道" && langOption("system").getAttribute("aria-checked") === "true" && !langMenu().classList.contains("is-open"),
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`,
 );
+// 点击外部关闭
+langBtn().click();
+document.body.dispatchEvent({ type: "pointerdown", bubbles: true });
+check(
+  "S10 菜单：点击外部关闭",
+  !langMenu().classList.contains("is-open") && langBtn().getAttribute("aria-expanded") === "false",
+);
+// Escape 关闭并等退场过渡结束后恢复 hidden（不拦截页面点击）
+langBtn().click();
+document.body.dispatchEvent({ type: "keydown", key: "Escape", bubbles: true });
+check(
+  "S10 菜单：Escape 关闭并回到触发按钮焦点",
+  !langMenu().classList.contains("is-open") && langBtn().getAttribute("aria-expanded") === "false" && globalThis.__lastFocus === langBtn(),
+  String(globalThis.__lastFocus?.id),
+);
+await sleep(180);
+check("S10 菜单：关闭动画结束后恢复 hidden", langMenu().hidden === true);
+// 快速重开：挂起的退场隐藏定时器不得把刚打开的菜单又藏掉
+langBtn().click();
+langBtn().click();
+langBtn().click();
+await sleep(200);
+check(
+  "S10 菜单：快速重开后不被退场定时器隐藏",
+  langMenu().classList.contains("is-open") && langMenu().hidden === false && langBtn().getAttribute("aria-expanded") === "true",
+);
+langBtn().click();
+await sleep(180);
+appStub.langSystemResolved = "en"; // 恢复 stub 默认（S10a 会显式设置）
 
 // ---------- S10a：system 采用后端 resolved（不自行判定） ----------
-// system 偏好保留：首启/无偏好仍由后端解析系统语言；按钮在 system 下显示
-// 当前生效语言，点击切到另一显式语言并持久化，不回到 system
+// system 偏好保留：首启/无偏好仍由后端解析系统语言；菜单「自动」项可随时回到该模式
 appStub.langSystemResolved = "en"; // 后端判定 en（本机 Node 前端解析可能不同）
 await T.setLanguagePref("system");
 check(
   "S10a system 采用后端 resolved=en（前后端一致）",
-  storage.get("frpdesk.language") === "system" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels" && langBtn().textContent === "EN",
-  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang} btn=${langBtn().textContent}`,
-);
-langBtn().click();
-await sleep(20);
-check(
-  "S10a system 下点击按钮：切到显式 zh-CN（不回 system）",
-  storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN" && langBtn().textContent === "中",
-  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang} btn=${langBtn().textContent}`,
+  storage.get("frpdesk.language") === "system" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels" && langOption("system").getAttribute("aria-checked") === "true",
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`,
 );
 appStub.langSystemResolved = "zh-CN";
 await T.setLanguagePref("system");

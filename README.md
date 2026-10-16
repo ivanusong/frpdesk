@@ -2,8 +2,6 @@
 
 # Frpdesk
 
-English | [简体中文](README_zh-CN.md)
-
 frpdesk is a native desktop client for [frp](https://github.com/fatedier/frp), built with [Wails v3](https://v3.wails.io). The frp client runs directly inside the app, with no sidecar process.
 
 ## Features
@@ -13,25 +11,6 @@ frpdesk is a native desktop client for [frp](https://github.com/fatedier/frp), b
 - Service status, logs, and HTTP request statistics
 - Menu-bar background running on macOS
 - Built-in HTTP proxy with CORS and Host rewriting
-- Simplified Chinese / English UI that can follow the system language
-
-## UI language
-
-- The title-bar language button is a two-state switch between **中文 ⇄ English**; it shows the current language (`中` or `EN`) and its tooltip/aria label states both the current language and what clicking will switch to. On first launch (or with no saved preference) the app follows the system language — Simplified Chinese on Chinese systems, English otherwise — and in that mode the **native side resolves the language** (environment variables first, then the platform UI language) with the webview following that result, so the UI and the tray menu always agree. Clicking the button always saves an explicit `zh-CN` or `en` preference and never returns to the system-follow mode.
-- The choice is persisted: the frontend stores it locally and also saves it in the config file (`language` field of `config.json`), so the tray menu and backend messages keep the same language after a restart. If saving fails, the UI rolls back to the last confirmed choice and shows an error instead of silently drifting from the tray.
-- Switching applies instantly: page, cards, forms, statistics, confirmations, toasts, tooltips and ARIA labels are re-rendered; unsaved form input is kept and tunnels are not restarted.
-- User data (service names, server addresses, domains), raw FRP errors and technical logs stay in their original form for troubleshooting. App-generated runtime logs — both the **Logs** panel and the terminal diagnostic logs (`slog`/stderr, update and cleanup messages) — are fixed in English and do not follow the interface language.
-
-## Translation contributions
-
-All user-visible strings live in two flat dictionaries (semantic key → zh/en text):
-
-| Location | Scope |
-| --- | --- |
-| `DICT` in `frontend/dist/i18n.js` | All frontend strings (static `data-i18n*` attributes and dynamic rendering); `{0}..{n}` are placeholders |
-| `dict` in `internal/i18n/keys.go` | Backend strings shown directly (tray menu/status, validation errors, connectivity probes, update prompts) |
-
-To add or change a translation: keep key names unchanged, keep both `zh` and `en` non-empty with matching `{n}` placeholders, then run `node scripts/verify-i18n.mjs` and `go test ./internal/i18n/`. Run `node scripts/verify-multiserver-ui.mjs` and `go test ./...` for behavior regressions. Raw FRP errors (`rawErr` / logs) must stay untranslated.
 
 ## Development
 
@@ -47,7 +26,6 @@ Frontend checks (zero npm dependencies, also run in CI):
 
 ```bash
 node scripts/verify-multiserver-ui.mjs   # multi-FRPS UI behavior
-node scripts/verify-i18n.mjs             # dictionary completeness and key alignment
 ```
 
 ## Release
