@@ -265,12 +265,73 @@ body {
   justify-content: center;
 }
 
-/* 语言按钮：紧凑文本态（中/EN）替代图标，与同排图标按钮同尺寸同基线 */
-#btn-lang {
-  font-size: 13px;
+/* 语言入口：图标按钮（与检查更新/主题同为 30px ghost icon）外层包裹层，锚定弹层 */
+.lang-pick-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* 语言弹层：锚定按钮下方右对齐的小型 popover（非全屏 modal）；
+   风格与图标 popover 一致：surface/border/shadow + 轻微淡入 */
+.lang-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 152px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top right;
+  transition:
+    opacity 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+}
+
+.lang-menu.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+/* 菜单项：整行可点的单行语言名；选中态用主色 + 浅底（与图标网格同语义） */
+.lang-option {
+  appearance: none;
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  font-family: inherit;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lang-option:hover {
+    background: var(--surface-2);
+  }
+}
+
+.lang-option.is-active {
+  background: var(--primary-soft);
+  color: var(--primary);
   font-weight: 600;
-  letter-spacing: 0.02em;
-  user-select: none;
+}
+
+.lang-option:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
 /* ghost 变体：无边框透明底（titlebar 内图标按钮），hover 浅底 */
@@ -2293,7 +2354,8 @@ button.service-icon:focus-visible {
     animation: none;
   }
 
-  .icon-popover {
+  .icon-popover,
+  .lang-menu {
     transform: none;
     transition: opacity 140ms linear;
   }
