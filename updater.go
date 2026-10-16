@@ -1,7 +1,8 @@
 package main
 
 // 应用内更新：封装 Wails v3 官方 pkg/updater（本地 v3.0.0-beta.28）+ providers/endpoint。
-// 更新源由构建参数 UPDATE_MANIFEST_URL 注入；空值时清晰禁用更新检查。
+// 多源（镜像优先、主源兜底）在 updater_failover.go 应用层实现，本文件只管状态机。
+// 更新源由构建参数注入；主源与镜像均为空时禁用更新检查。
 //
 // 约定与边界（务必维持）：
 //   - 框架 Config.CheckInterval 严禁设置：其定时器每 tick 调 CheckAndInstall，
@@ -20,15 +21,18 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
-	"github.com/wailsapp/wails/v3/pkg/updater/providers/endpoint"
 
 	"frpdesk/internal/configstore"
 	"frpdesk/internal/i18n"
 )
 
 // updateManifestURL 由 build.sh 的 UPDATE_MANIFEST_URL 参数经 -ldflags 注入；
-// 默认空字符串表示发行构建未配置更新源，此时更新检查明确禁用。
+// 默认空字符串表示未配置主源；主源与镜像均为空时禁用更新检查。
 var updateManifestURL = ""
+
+// updateMirrorBaseURL 由 build.sh 的 UPDATE_MIRROR_BASE_URL 参数经 -ldflags 注入；
+// 空值表示未配置镜像，保持原单一主源行为。仅构建期注入，运行时只读。
+var updateMirrorBaseURL = ""
 
 // updateCheckInterval 后台自动检查周期：每 6 小时只 Check，绝不自动安装。
 const updateCheckInterval = 6 * time.Hour
@@ -102,7 +106,8 @@ type updaterController struct {
 	fw          fwUpdater
 	emit        func(name string, data any)             // app:update 事件出口（attach 后可用）
 	log         func(level, format string, args ...any) // slog + 应用日志环形缓冲
-	manifestURL string                                  // 构建时注入的更新清单地址；空值禁用更新
+	manifestURL string                                  // 构建时注入的主更新清单地址
+	mirrorURL   string                                  // 构建时注入的镜像根地址；空值禁用镜像
 
 	mu   sync.Mutex
 	info UpdateInfo
@@ -119,17 +124,23 @@ type updaterController struct {
 }
 
 func newUpdaterController(log func(level, format string, args ...any)) *updaterController {
-	return newUpdaterControllerWithManifestURL(log, updateManifestURL)
+	return newUpdaterControllerWithSources(log, updateManifestURL, updateMirrorBaseURL)
 }
 
-// newUpdaterControllerWithManifestURL 显式传入更新源，便于隔离测试与构建配置。
+// newUpdaterControllerWithManifestURL 显式传入主更新源（镜像未配置），便于隔离测试。
 func newUpdaterControllerWithManifestURL(log func(level, format string, args ...any), manifestURL string) *updaterController {
+	return newUpdaterControllerWithSources(log, manifestURL, "")
+}
+
+// newUpdaterControllerWithSources 显式传入主源与镜像根，便于隔离测试与构建配置。
+func newUpdaterControllerWithSources(log func(level, format string, args ...any), manifestURL, mirrorBaseURL string) *updaterController {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &updaterController{
 		log:         log,
 		ctx:         ctx,
 		cancel:      cancel,
 		manifestURL: manifestURL,
+		mirrorURL:   mirrorBaseURL,
 		info:        UpdateInfo{State: updIdle},
 	}
 }
@@ -157,21 +168,30 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 		c.notify()
 		return
 	}
-	if strings.TrimSpace(c.manifestURL) == "" {
+	bothEmpty := strings.TrimSpace(c.manifestURL) == "" && strings.TrimSpace(c.mirrorURL) == ""
+	if bothEmpty {
 		c.mu.Lock()
 		c.info.State = updDisabled
 		c.info.Message = i18n.T("upd.noManifest")
 		c.mu.Unlock()
-		c.log("warn", "[更新] 未配置更新源，更新检查与安装已禁用（构建时可设置 UPDATE_MANIFEST_URL）")
+		c.log("warn", "[更新] 未配置更新源，更新检查与安装已禁用（构建时可设置 UPDATE_MANIFEST_URL / UPDATE_MIRROR_BASE_URL）")
 		c.notify()
 		return
 	}
 
-	prov, err := endpoint.New(endpoint.Config{URL: c.manifestURL})
+	prov, err := newUpdateProvider(updateProviderConfig{
+		manifestURL:   c.manifestURL,
+		mirrorBaseURL: c.mirrorURL,
+		log:           c.log,
+	})
 	if err != nil {
 		c.log("error", "[更新] 初始化更新源失败：%v", err)
 		c.applyState(updError, i18n.T("upd.manifestInitFail", configstore.BriefMessage(err.Error(), 120)))
 		return
+	}
+	mirrorDesc := c.mirrorURL
+	if mirrorDesc == "" {
+		mirrorDesc = "未配置"
 	}
 
 	// 刻意不设置 CheckInterval（框架定时器会 CheckAndInstall 自动安装），
@@ -186,8 +206,8 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 		return
 	}
 
-	c.log("info", "[更新] 更新器就绪：当前版本 %s，源 %s，每 %s 自动检查（仅检查不安装）",
-		version, c.manifestURL, updateCheckInterval)
+	c.log("info", "[更新] 更新器就绪：当前版本 %s，主源 %s，镜像 %s，每 %s 自动检查（仅检查不安装）",
+		version, c.manifestURL, mirrorDesc, updateCheckInterval)
 	c.notify()
 
 	go c.periodicLoop()

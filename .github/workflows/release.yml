@@ -1,6 +1,8 @@
 # 发布工作流：推送 v x.y.z tag 触发。严格校验 tag 与 VERSION、CHANGELOG 最新节完全一致，
 # 然后复用 build.sh 构建三目标产物，生成 Wails updater stable.json，并以 GitHub Release 发布。
 # 与本地私有发布流程（MinIO/rclone）无关；普通 Build 工作流保持只读、不发布。
+# 另含独立的 sync-mirror 作业：release 成功后把已发布资产原样同步到可选 S3 镜像
+# （未配置镜像则跳过；镜像失败不影响已发布的 GitHub Release，可用 Re-run failed jobs 重跑）。
 name: Release
 
 on:
@@ -79,10 +81,13 @@ jobs:
       - name: 双语词典校验（零依赖 Node 脚本）
         run: node scripts/verify-i18n.mjs
 
-      - name: 三目标发行构建（复用 build.sh，注入 GitHub 更新源）
-        # 客户端更新源仅在此处注入：普通 Build 工作流不设置，应用内更新检查保持禁用
+      - name: 三目标发行构建（复用 build.sh，注入 GitHub 更新源与可选镜像根）
+        # 更新源在此处注入：主源固定指向本仓库 Release（由 GITHUB_REPOSITORY 推导，
+        # fork 发布时自动指向 fork 自己）；UPDATE_MIRROR_BASE_URL 来自仓库 Variable，
+        # 未配置时为空，build.sh 跳过镜像注入，应用内更新行为不变
         env:
-          UPDATE_MANIFEST_URL: 'https://github.com/ivanusong/frpdesk/releases/latest/download/stable.json'
+          UPDATE_MANIFEST_URL: '${{ github.server_url }}/${{ github.repository }}/releases/latest/download/stable.json'
+          UPDATE_MIRROR_BASE_URL: '${{ vars.UPDATE_MIRROR_BASE_URL }}'
         run: bash build.sh
 
       - name: 打包三平台产物与许可文档包（按 VERSION 命名）
@@ -98,8 +103,8 @@ jobs:
 
       - name: 生成 Wails updater stable.json（stable 通道，notes 取自 CHANGELOG）
         env:
-          # 产物下载根：GitHub Release 固定资产路径
-          DOWNLOAD_BASE_URL: 'https://github.com/ivanusong/frpdesk/releases/download'
+          # 产物下载根：GitHub Release 固定资产路径（由仓库推导，支持 fork）
+          DOWNLOAD_BASE_URL: '${{ github.server_url }}/${{ github.repository }}/releases/download'
         run: |
           set -euo pipefail
           wails3 updater manifest \
@@ -157,3 +162,94 @@ jobs:
           fi
           gh release edit "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false
           echo "[release] 已发布 v${VERSION}（5 个资产齐全，latest/download/stable.json 生效）"
+
+  # 可选镜像同步：独立作业，仅依赖 GitHub Release 发布成功；从已发布资产重新下载后
+  # 原样同步（不重新构建），保证镜像与 GitHub 产物逐字节一致。放在独立作业是为了
+  # 镜像失败可用 Re-run failed jobs 单独重跑，不会重跑 release 作业里的 gh release create。
+  sync-mirror:
+    name: 可选 S3 镜像同步（未配置则跳过）
+    needs: release
+    # vars 只能感知 Variable：仅配置了 Secret 而完全没配 Variable 的异常组合不会进入本作业；
+    # 任何 Variable 已配置但必填项不全的组合会进入作业并由脚本明确报错
+    if: ${{ needs.release.result == 'success' && (vars.UPDATE_MIRROR_BASE_URL != '' || vars.MIRROR_S3_ENDPOINT != '' || vars.MIRROR_S3_BUCKET != '') }}
+    permissions:
+      contents: read
+    runs-on: macos-14
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 解析并校验版本号（取自 tag）
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          if ! printf '%s' "$tag_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "[mirror] tag 版本格式非法：${GITHUB_REF_NAME}（期望 v 前缀加三段数字）" >&2
+            exit 1
+          fi
+          echo "VERSION=${tag_version}" >> "$GITHUB_ENV"
+          echo "[mirror] 目标版本：v${tag_version}（与 release 作业发布内容的一致性由镜像脚本按清单校验）"
+
+      - name: 下载已发布 Release 资产（镜像唯一来源）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p mirror-staging
+          gh release download "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --dir mirror-staging
+          ls -lh mirror-staging
+
+      - name: 核对 licenses.zip 与 GitHub 服务端摘要（stable.json 不覆盖该资产）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          asset="frpdesk-${VERSION}-licenses.zip"
+          path="mirror-staging/${asset}"
+          if [ ! -f "$path" ]; then
+            echo "[mirror] 已发布资产缺少 ${asset}" >&2
+            exit 1
+          fi
+          digest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}" --jq ".assets[] | select(.name == \"${asset}\") | .digest // \"\"")"
+          if [ -z "$digest" ]; then
+            echo "[mirror] GitHub 未返回资产摘要，跳过服务端核对（镜像脚本仍会做上传回读校验）"
+            exit 0
+          fi
+          algo="${digest%%:*}"
+          hex="${digest#*:}"
+          if [ "$algo" != "sha256" ] || [ -z "$hex" ]; then
+            echo "[mirror] GitHub 返回未知摘要格式：${digest}，跳过服务端核对"
+            exit 0
+          fi
+          actual="$(shasum -a 256 "$path" | awk '{print $1}')"
+          if [ "$actual" != "$hex" ]; then
+            echo "[mirror] ${asset} sha256 与 GitHub 服务端不一致：本地 ${actual} ≠ 远端 ${hex}" >&2
+            exit 1
+          fi
+          echo "[mirror] ${asset} sha256 与 GitHub 服务端一致"
+
+      - name: 确保 rclone 可用（缺失时 Homebrew 公共安装）
+        run: |
+          set -euo pipefail
+          if ! command -v rclone >/dev/null 2>&1; then
+            echo "[mirror] runner 未预装 rclone，通过 Homebrew 安装公共版本"
+            brew install rclone
+          fi
+          rclone version | head -1
+
+      - name: 同步到镜像（未配置镜像时脚本跳过；任何失败本作业显式变红）
+        env:
+          UPDATE_MIRROR_BASE_URL: ${{ vars.UPDATE_MIRROR_BASE_URL }}
+          MIRROR_S3_ENDPOINT: ${{ vars.MIRROR_S3_ENDPOINT }}
+          MIRROR_S3_BUCKET: ${{ vars.MIRROR_S3_BUCKET }}
+          MIRROR_S3_PREFIX: ${{ vars.MIRROR_S3_PREFIX }}
+          MIRROR_S3_REGION: ${{ vars.MIRROR_S3_REGION }}
+          MIRROR_S3_ACCESS_KEY_ID: ${{ secrets.MIRROR_S3_ACCESS_KEY_ID }}
+          MIRROR_S3_SECRET_ACCESS_KEY: ${{ secrets.MIRROR_S3_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          bash scripts/publish-mirror.sh \
+            --version "${VERSION}" \
+            --manifest "mirror-staging/stable.json" \
+            --artifacts-dir "mirror-staging" \
+            --extra-file "mirror-staging/frpdesk-${VERSION}-licenses.zip"

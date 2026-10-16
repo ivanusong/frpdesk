@@ -58,8 +58,40 @@ section of [CHANGELOG.md](CHANGELOG.md); the
 macOS and Windows artifacts, generates the Wails updater `stable.json` from the
 CHANGELOG notes, and publishes everything as a GitHub Release.
 
-Shipped builds check for updates at
-`https://github.com/ivanusong/frpdesk/releases/latest/download/stable.json`.
+Shipped builds check for updates against the GitHub Release `stable.json` of the
+repository they were built from (derived at build time, so forks publish their own
+update source). The concrete URL is injected by the build, never hardcoded in source.
+
+### Optional update mirror (S3)
+
+The official release can additionally sync the published assets, byte-for-byte, to
+any S3-compatible storage for faster downloads. It is entirely optional: without the
+configuration below, releases go to GitHub only and everything keeps working.
+
+Repository **Actions variables**:
+
+| Variable | Meaning |
+| --- | --- |
+| `UPDATE_MIRROR_BASE_URL` | Public download root of the mirror (no trailing slash); compiled into binaries at build time |
+| `MIRROR_S3_ENDPOINT` | S3-compatible endpoint |
+| `MIRROR_S3_BUCKET` | Bucket name |
+| `MIRROR_S3_PREFIX` | Optional key prefix inside the bucket |
+| `MIRROR_S3_REGION` | Optional, defaults to `us-east-1` |
+
+Repository **Actions secrets**: `MIRROR_S3_ACCESS_KEY_ID`, `MIRROR_S3_SECRET_ACCESS_KEY`.
+
+Layout: `<root>/releases/<version>/<original-release-filename>` plus a per-version
+`manifest.json`; the root `stable.json` (published with `Cache-Control: no-cache`)
+points clients at the current version. The mirror manifest is derived from the
+published GitHub `stable.json` with only the artifact URLs rewritten — versions,
+sizes and digests stay identical, so the app can fall back from the mirror to GitHub
+without ever accepting a different version.
+
+Behavior: a partially filled configuration fails the sync job loudly; the sync runs
+as a separate job after the GitHub Release is published, re-uploads nothing that is
+already identical, refuses to overwrite version-scoped objects with different
+content, and only then switches the root `stable.json`. If the mirror is down,
+clients automatically fall back to GitHub.
 
 
 ## License

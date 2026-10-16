@@ -2,8 +2,10 @@
 # frpdesk 一键跨平台构建：Windows amd64 + macOS arm64 + macOS amd64 一次全出。
 #
 # 可选环境变量：
-#   UPDATE_MANIFEST_URL  自定义客户端更新源（stable.json 完整 URL）；设置后注入，
-#                        不设置则应用内更新检查明确禁用（默认不内置任何地址）。
+#   UPDATE_MANIFEST_URL     自定义客户端更新主源（stable.json 完整 URL）；设置后注入，
+#                           两项均不设置时禁用更新检查（默认不内置任何地址）。
+#   UPDATE_MIRROR_BASE_URL  可选官方镜像公开根地址（http(s)、无尾斜杠、无空白/引号）；
+#                           设置后应用优先从镜像检查与下载，网络失败回退主源。
 #
 # 流程：生成 Go bindings → 同步进 embed 目录（frontend/dist）→ 按目标矩阵编译。
 # macOS 产物打包成 .app（ad-hoc 签名）；Windows 产物为单文件 exe。
@@ -36,11 +38,16 @@ WAILS3_VERSION="v3.0.0-beta.28"
 
 # 客户端更新源：默认空 = 不注入，应用内更新检查禁用（可选自定义）
 UPDATE_MANIFEST_URL="${UPDATE_MANIFEST_URL:-}"
+# 可选镜像根地址：默认空 = 不注入，行为与未配置镜像时完全一致
+UPDATE_MIRROR_BASE_URL="${UPDATE_MIRROR_BASE_URL:-}"
 
-# 公共链接参数：版本号必注入；更新源只在显式配置时注入
+# 公共链接参数：版本号必注入；更新源只在显式配置时注入（注入前先在下方校验）
 BUILD_LDFLAGS="-w -s -X main.currentVersion=${VERSION}"
 if [ -n "$UPDATE_MANIFEST_URL" ]; then
     BUILD_LDFLAGS="$BUILD_LDFLAGS -X main.updateManifestURL=${UPDATE_MANIFEST_URL}"
+fi
+if [ -n "$UPDATE_MIRROR_BASE_URL" ]; then
+    BUILD_LDFLAGS="$BUILD_LDFLAGS -X main.updateMirrorBaseURL=${UPDATE_MIRROR_BASE_URL}"
 fi
 
 C_GREEN='\033[0;32m'; C_RED='\033[0;31m'; C_RESET='\033[0m'
@@ -48,6 +55,32 @@ info() { printf "${C_GREEN}[构建]${C_RESET} %s\n" "$*"; }
 err()  { printf "${C_RED}[错误]${C_RESET} %s\n" "$*" >&2; }
 
 [ -n "$VERSION" ] || { err "VERSION 文件缺失或为空"; exit 1; }
+
+# 校验注入地址：防止空白/引号/反斜杠破坏 ldflags 参数
+validate_url() {
+    local name="$1" value="$2" bad=""
+    [ -z "$value" ] && return 0
+    case "$value" in
+        http://*|https://*) ;;
+        *) err "$name 必须是 http(s) 地址：$value"; exit 1 ;;
+    esac
+    case "$value" in
+        *" "*|*$'\t'*|*$'\r'*|*$'\n'*) bad="空白字符" ;;
+        *"\""*|*"'"*) bad="引号字符" ;;
+        *"\\"*) bad="反斜杠字符" ;;
+    esac
+    if [ -n "$bad" ]; then
+        err "$name 不能包含${bad}"
+        exit 1
+    fi
+}
+validate_url UPDATE_MANIFEST_URL "$UPDATE_MANIFEST_URL"
+validate_url UPDATE_MIRROR_BASE_URL "$UPDATE_MIRROR_BASE_URL"
+# 镜像根按约定不带尾斜杠（客户端按 <base>/releases/<version>/<filename> 拼接）
+if [ -n "$UPDATE_MIRROR_BASE_URL" ] && [ "${UPDATE_MIRROR_BASE_URL%/}" != "$UPDATE_MIRROR_BASE_URL" ]; then
+    err "UPDATE_MIRROR_BASE_URL 不能以 / 结尾"
+    exit 1
+fi
 
 # ---- 前置检查 ================================================================
 
@@ -153,9 +186,15 @@ build_darwin amd64
 build_windows
 
 if [ -n "$UPDATE_MANIFEST_URL" ]; then
-    info "已注入客户端更新源（stable.json）"
+    if [ -n "$UPDATE_MIRROR_BASE_URL" ]; then
+        info "已注入客户端更新主源（stable.json）与镜像源：${UPDATE_MIRROR_BASE_URL}"
+    else
+        info "已注入客户端更新主源（stable.json）"
+    fi
+elif [ -n "$UPDATE_MIRROR_BASE_URL" ]; then
+    info "已注入镜像更新源：${UPDATE_MIRROR_BASE_URL}"
 else
-    info "未配置 UPDATE_MANIFEST_URL：应用内更新检查将禁用"
+    info "未配置更新源：应用内更新检查将禁用"
 fi
 
 # Windows EXE 的许可文档作为邻接文件分发；CI 同时打为 licenses.zip。
