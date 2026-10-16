@@ -17,8 +17,8 @@ frpdesk is a native desktop client for [frp](https://github.com/fatedier/frp), b
 
 ## UI language
 
-- The title-bar language button cycles through **System → 简体中文 → English**; the default is System, which uses Simplified Chinese on Chinese systems and falls back to English for other languages.
-- The choice is persisted: the frontend stores it locally and also saves it in the config file (`language` field of `config.json`), so the tray menu and backend messages keep the same language after a restart.
+- The title-bar language button cycles through **System → 简体中文 → English**; the default is System, which uses Simplified Chinese on Chinese systems and falls back to English for other languages. In System mode the **native side resolves the language** (environment variables first, then the platform UI language) and the webview follows that result, so the UI and the tray menu always agree.
+- The choice is persisted: the frontend stores it locally and also saves it in the config file (`language` field of `config.json`), so the tray menu and backend messages keep the same language after a restart. If saving fails, the UI rolls back to the last confirmed choice and shows an error instead of silently drifting from the tray.
 - Switching applies instantly: page, cards, forms, statistics, confirmations, toasts, tooltips and ARIA labels are re-rendered; unsaved form input is kept and tunnels are not restarted.
 - User data (service names, server addresses, domains), technical logs and raw FRP errors stay in their original form for troubleshooting.
 

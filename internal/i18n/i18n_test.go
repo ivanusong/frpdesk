@@ -152,17 +152,94 @@ func TestSetPreferenceNormalization(t *testing.T) {
 	}
 }
 
-// TestNormalizeLang locale 标签归一：zh 各形态→ZH，其他→EN。
+// TestNormalizeLang locale 标签归一：zh 各形态→ZH，其他→EN；代码集/修饰符/C 不干扰判定。
 func TestNormalizeLang(t *testing.T) {
-	for _, s := range []string{"zh", "zh-CN", "zh_CN", "zh-Hans-CN@rg=zzzz", "zh-TW"} {
+	for _, s := range []string{"zh", "zh-CN", "zh_CN", "zh-Hans-CN@rg=zzzz", "zh-TW", "zh_CN.UTF-8", "zh.UTF-8"} {
 		if l := NormalizeLang(s); l != ZH {
 			t.Fatalf("NormalizeLang(%q) = %v, want zh-CN", s, l)
 		}
 	}
-	for _, s := range []string{"en", "en-US", "fr-FR", "ja-JP", "", "en@rg=zhzzzy"} {
+	for _, s := range []string{"en", "en-US", "en_US.UTF-8", "fr-FR", "ja-JP", "", "en@rg=zhzzzy", "C", "POSIX"} {
 		if l := NormalizeLang(s); l != EN {
 			t.Fatalf("NormalizeLang(%q) = %v, want en", s, l)
 		}
+	}
+}
+
+// TestLangFromEnvPriority 环境变量优先级：LC_ALL > LC_MESSAGES > LANG；
+// 只认第一个非空变量——LC_ALL=en_US + LANG=zh_CN 必须为英文（英文环境不被忽略），
+// 空串视为未设置。
+func TestLangFromEnvPriority(t *testing.T) {
+	cases := []struct {
+		name       string
+		lcAll      string
+		lcMessages string
+		lang       string
+		want       Lang
+	}{
+		{name: "LC_ALL 优先于 LANG", lcAll: "en_US.UTF-8", lang: "zh_CN.UTF-8", want: EN},
+		{name: "LC_ALL 中文优先于 LANG 英文", lcAll: "zh_CN.UTF-8", lang: "en_US", want: ZH},
+		{name: "LC_ALL 空串视为未设置", lcAll: "", lcMessages: "zh_CN", lang: "en_US", want: ZH},
+		{name: "LC_MESSAGES 优先于 LANG", lcMessages: "en_US", lang: "zh_CN", want: EN},
+		{name: "仅 LANG 中文", lang: "zh_CN", want: ZH},
+		{name: "仅 LANG 英文", lang: "en_US", want: EN},
+		{name: "其他语言回退英文", lang: "fr_FR", want: EN},
+		{name: "C locale 回退英文", lang: "C", want: EN},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LC_ALL", tc.lcAll)
+			t.Setenv("LC_MESSAGES", tc.lcMessages)
+			t.Setenv("LANG", tc.lang)
+			if got := langFromEnv(); got != tc.want {
+				t.Fatalf("langFromEnv() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDarwinOutputsParsing macOS defaults 输出解析：AppleLanguages 按首选顺序取首项，
+// 中文地区 + 英文首选 → 英文；AppleLanguages 不可用时才用 AppleLocale 兜底。
+func TestDarwinOutputsParsing(t *testing.T) {
+	cases := []struct {
+		name      string
+		languages string
+		locale    string
+		want      Lang
+	}{
+		{name: "中文地区+英文首选→英文", languages: "(\n    en,\n    \"zh-Hans-CN\"\n)", locale: "zh_CN", want: EN},
+		{name: "英文地区+中文首选→中文", languages: "(\n    \"zh-Hans-CN\",\n    en\n)", locale: "en_US", want: ZH},
+		{name: "首选中文", languages: "(zh-Hans-CN, en)", locale: "", want: ZH},
+		{name: "首选英文", languages: "(en-US, zh-CN)", locale: "", want: EN},
+		{name: "其他语言首选回退英文", languages: "(fr-FR, zh-CN)", locale: "zh_CN", want: EN},
+		{name: "AppleLanguages 缺失用地区兜底（zh）", languages: "", locale: "zh_CN", want: ZH},
+		{name: "AppleLanguages 缺失用地区兜底（en，含修饰符）", languages: "", locale: "en_US@rg=zhzzhy", want: EN},
+		{name: "两者均缺失返回空", languages: "", locale: "", want: ""},
+		{name: "空数组/空项跳过", languages: "( )", locale: "zh_TW", want: ZH},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := darwinLangFromOutputs(tc.languages, tc.locale); got != tc.want {
+				t.Fatalf("darwinLangFromOutputs(%q, %q) = %q, want %q", tc.languages, tc.locale, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLangFromUILanguageID Windows LANGID 判定：低 10 位主语言 ID 0x0004 为中文，
+// 0 表示未知返回空（调用方回退），其他返回英文。
+func TestLangFromUILanguageID(t *testing.T) {
+	if got := langFromUILanguageID(0x0804); got != ZH { // zh-CN
+		t.Fatalf("0x0804 = %v, want zh-CN", got)
+	}
+	if got := langFromUILanguageID(0x0404); got != ZH { // zh-TW 主语言仍为中文
+		t.Fatalf("0x0404 = %v, want zh-CN", got)
+	}
+	if got := langFromUILanguageID(0x0409); got != EN { // en-US
+		t.Fatalf("0x0409 = %v, want en", got)
+	}
+	if got := langFromUILanguageID(0); got != "" {
+		t.Fatalf("0 = %q, want empty", got)
 	}
 }
 

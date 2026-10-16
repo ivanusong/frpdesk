@@ -75,6 +75,7 @@ export const DICT = {
   "lang.en": { zh: "English", en: "English" },
   "lang.systemResolved": { zh: "跟随系统（{0}）", en: "System ({0})" },
   "lang.aria": { zh: "切换语言", en: "Switch language" },
+  "lang.syncFail": { zh: "语言偏好未保存：{0}", en: "Language preference was not saved: {0}" },
 
   // ---- Tab 与工具行 ----
   "tab.aria": { zh: "功能面板", en: "Panels" },
@@ -307,11 +308,12 @@ export const DICT = {
   },
 };
 
-// 当前偏好与解析后的语言（模块级状态；main.js 通过 setPref/currentLang 使用）
+// 当前偏好与解析后的语言（模块级状态；main.js 通过 applyPref/currentPref/currentLang 使用）
 let pref = PREF_SYSTEM;
 let lang = PREF_EN;
 
-// systemLang：系统语言解析。中文（zh 开头）→ 简体中文；其他语言 → 英文回退。
+// systemLang：系统语言解析。按用户首选顺序取第一项：中文（zh 开头）→ 简体中文，
+// 其他语言 → 英文回退（不以“列表里出现中文”覆盖首选，避免忽略首选语言）。
 export function systemLang() {
   let tags = [];
   try {
@@ -320,16 +322,30 @@ export function systemLang() {
   } catch {
     /* 无 navigator 的环境走回退 */
   }
-  for (const tag of tags) {
-    if (/^zh([-_]|$)/i.test(String(tag))) return PREF_ZH;
-  }
-  return PREF_EN;
+  return langFromTags(tags);
 }
 
-// resolveLang：偏好 → 生效语言；非法/未知偏好按 system 解析（与其他语言回退英文一致）。
+// langFromTags：纯函数版本（供单测/复用）：取首个非空语言标签判定，空列表回退英文。
+export function langFromTags(tags) {
+  const list = Array.isArray(tags) ? tags : [tags];
+  const first = list.find((x) => typeof x === "string" && x.trim() !== "");
+  return /^zh([-_]|$)/i.test(String(first ?? "")) ? PREF_ZH : PREF_EN;
+}
+
+// normalizePref：偏好值归一：只允许 system/zh-CN/en，缺失/未知一律 system。
+export function normalizePref(p) {
+  return LANG_PREFS.includes(p) ? p : PREF_SYSTEM;
+}
+
+// normalizeLang：生效语言归一：只允许 zh-CN/en，其他返回 null（调用方自行兜底）。
+export function normalizeLang(l) {
+  return l === PREF_ZH || l === PREF_EN ? l : null;
+}
+
+// resolveLang：偏好 → 生效语言；system/未知偏好按系统语言解析（其他语言回退英文）。
 export function resolveLang(p) {
-  if (p === PREF_ZH) return PREF_ZH;
-  if (p === PREF_EN) return PREF_EN;
+  const pref = normalizePref(p);
+  if (pref === PREF_ZH || pref === PREF_EN) return pref;
   return systemLang();
 }
 
@@ -343,24 +359,6 @@ export function readStoredPref() {
   }
 }
 
-// applyPref：应用偏好并同步 <html lang>；persist=true 时写入 localStorage。
-// 返回生效语言。调用方（main.js）负责触发界面重渲染与后端同步。
-export function applyPref(p, persist = false) {
-  pref = LANG_PREFS.includes(p) ? p : PREF_SYSTEM;
-  lang = resolveLang(pref);
-  try {
-    if (persist) localStorage.setItem(STORAGE_KEY, pref);
-  } catch {
-    /* 隐私模式等场景允许失败 */
-  }
-  try {
-    document.documentElement.lang = lang;
-  } catch {
-    /* 无 document 的环境（词典自检脚本）允许跳过 */
-  }
-  return lang;
-}
-
 // currentPref / currentLang：当前偏好 / 生效语言。
 export function currentPref() {
   return pref;
@@ -372,15 +370,34 @@ export function currentLang() {
 
 // t(key, ...args)：取当前语言文案并做 {0}..{n} 参数插值。
 // 查找顺序：当前语言 → 英文 → key 本身（缺失 key 可见且可排查）。
+// 插值单次扫描模板：参数内容不再被后续参数递归替换（如服务名含 {1} 时原样保留），
+// 参数中的 $ 等字符也不参与替换串特殊处理。
 export function t(key, ...args) {
   const entry = DICT[key];
   if (!entry) return String(key);
   // 词典字段名固定为 zh/en（比语言标签紧凑）；此处做一次映射
-  const field = currentLang() === PREF_ZH ? "zh" : "en";
-  let text = entry[field] ?? entry.en ?? entry.zh ?? String(key);
+  const field = lang === PREF_ZH ? "zh" : "en";
+  const text = entry[field] ?? entry.en ?? entry.zh ?? String(key);
   if (!args.length) return text;
-  for (let i = 0; i < args.length; i++) {
-    text = text.replaceAll(`{${i}}`, String(args[i]));
+  return text.replace(/\{([0-9])\}/g, (m, d) => (Number(d) < args.length ? String(args[Number(d)]) : m));
+}
+
+// applyPref：应用偏好并同步 <html lang>。opts.persist=true 时写入 localStorage；
+// opts.resolved 为后端确认的生效语言（system 偏好的权威解析），传入时优先使用
+// （保证 WebView 与原生托盘语言一致），缺失/非法时回退本地系统语言解析。
+// 返回生效语言。调用方（main.js）负责触发界面重渲染与后端同步。
+export function applyPref(p, opts = {}) {
+  pref = normalizePref(p);
+  lang = normalizeLang(opts.resolved) ?? resolveLang(pref);
+  try {
+    if (opts.persist) localStorage.setItem(STORAGE_KEY, pref);
+  } catch {
+    /* 隐私模式等场景允许失败 */
   }
-  return text;
+  try {
+    document.documentElement.lang = lang;
+  } catch {
+    /* 无 document 的环境（词典自检脚本）允许跳过 */
+  }
+  return lang;
 }

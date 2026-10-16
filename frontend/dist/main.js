@@ -1,6 +1,6 @@
 // frpdesk 前端逻辑：纯原生 JS。bindings 调后端，Events 订阅推送。
 import * as api from "./bindings/frpdesk/index.js";
-import { t, applyPref, currentPref, readStoredPref, systemLang } from "./i18n.js";
+import { t, applyPref, currentPref, currentLang, normalizePref, normalizeLang, readStoredPref, resolveLang } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -223,14 +223,27 @@ function briefText(s, n) {
 // ---------- 语言（三态：system / zh-CN / en，localStorage + 后端 config.json 双持久化）----------
 
 // 语言偏好与主题同一模式：本地先应用（首帧正确），选择变化同步后端（托盘/后端消息语言）。
-// 后端 config.json 的 language 为权威（启动时托盘按它取词）；boot 拉取快照后对齐。
+// 后端 config.json + 快照的 resolved language 为权威：system 模式不做前端独立判定，
+// 统一采用后端探测结果，避免 WebView 与原生托盘语言不一致。
 const LANG_ORDER = ["system", "zh-CN", "en"];
 
-// langDisplayName：语言按钮 tip 里的偏好展示名（system 附解析结果）
+// langSync：语言写入串行/去重与确认状态。
+//   seq：用户每次改动的序号；链上任务执行前/结果返回后都校验，只有最新一次生效
+//        （快速连点只落最后一次，迟到响应丢弃，不覆盖新选择）；
+//   chain：写入串行链（同一时刻至多一个 SetLanguage 在途）；
+//   confirmed：最近一次后端确认一致的 { pref, resolved }（失败回滚基准）。
+const langSync = {
+  seq: 0,
+  chain: Promise.resolve(),
+  confirmed: null,
+};
+
+// langDisplayName：语言按钮 tip 里的偏好展示名（system 附当前生效语言，
+// 即后端确认的 resolved，而非前端自行探测值）。
 function langDisplayName(pref) {
   if (pref === "zh-CN") return t("lang.zh");
   if (pref === "en") return t("lang.en");
-  return t("lang.systemResolved", t(systemLang() === "zh-CN" ? "lang.zh" : "lang.en"));
+  return t("lang.systemResolved", t(currentLang() === "zh-CN" ? "lang.zh" : "lang.en"));
 }
 
 // renderLangButton：语言按钮 tip/aria 随当前偏好刷新
@@ -249,24 +262,30 @@ function applyStaticI18n() {
   for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
 }
 
-// rerenderModalTitles：模态打开期间切语言时重算动态标题（不丢表单输入）
-function rerenderModalTitles() {
+// refreshOpenModalI18n：模态打开期间切语言时重算动态文案（不丢表单输入与目标选择）：
+// 标题（协议以实际表单值为准，编辑 TCP→UDP 后标题随新协议）、目标 Frps 下拉
+// （空状态/「（当前）」后缀）、迁移提示（地址预览/短暂中断）。
+function refreshOpenModalI18n() {
   const ctx = state.modalCtx;
   if (!ctx) return;
   if (ctx.kind === "service" && !$("service-modal").hidden) {
+    const type = $("service-form").elements.type.value || ctx.type;
+    ctx.type = type;
     $("modal-title").textContent = ctx.editing
-      ? t("modal.editService", svcTypeLabel(ctx.type))
-      : ctx.type === "http"
+      ? t("modal.editService", svcTypeLabel(type))
+      : type === "http"
         ? t("action.addHttp")
         : t("action.addPort");
+    syncServerSelect(type, true); // preserve：原样保留已选目标（含未选择），只刷新文案
+    updateMoveHint();
   } else if (ctx.kind === "server" && !$("server-modal").hidden) {
     $("server-modal-title").textContent = ctx.editing ? t("modal.editServer") : t("modal.addServer");
   }
 }
 
 // applyLanguage：语言变化后的整体重绘（纯渲染，不触发任何后端业务调用）。
-// 覆盖静态文案、主题/语言按钮、状态栏、列表卡片、日志标注、统计与更新区，
-// 全部从内存/已有状态重渲染，不丢用户数据、不重启隧道。
+// 覆盖静态文案、主题/语言按钮、状态栏、列表卡片、日志标注、统计、更新区与
+// 打开中的模态动态文案，全部从内存/已有状态重渲染，不丢用户数据、不重启隧道。
 function applyLanguage() {
   applyStaticI18n();
   applyTheme(document.documentElement.dataset.theme ?? "system", false);
@@ -279,22 +298,67 @@ function applyLanguage() {
   else if (state.stats.error) renderStatsError();
   renderUpdate();
   renderCheckButton();
-  rerenderModalTitles();
+  refreshOpenModalI18n();
 }
 
-// initLanguage：首帧应用持久化偏好（只读 localStorage）；用户改动后调 setLanguagePref。
+// initLanguage：首帧应用本地缓存偏好（只读；resolved 待快照/绑定返回后以后端为准）。
 function initLanguage() {
-  applyPref(readStoredPref(), false);
+  applyPref(readStoredPref(), { persist: false });
   applyStaticI18n();
   renderLangButton();
 }
 
-// setLanguagePref：切换偏好（持久化到 localStorage + 后端 config.json）并即时重绘。
-// 后端调用失败不回滚本地选择（下次启动以本地缓存为准并重试同步）。
-function setLanguagePref(pref, opts = {}) {
-  applyPref(pref, opts.persist !== false);
+// reconcileLanguageFromSnapshot：启动快照对齐（后端权威）。
+// - 拉取期间用户已改语言（seq 已推进）→ 不覆盖本地意图，返回 false；
+// - 快照 config.language 缺失/非法 → 按 system 权威对齐（不信本地残留）；
+// - 快照顶层 language（后端 resolved）合法则直接采用，否则回退本地系统解析（旧后端）。
+// 成功对齐会持久化并记为「已确认一致」状态，返回 true。
+function reconcileLanguageFromSnapshot(snap, seqAtRequest) {
+  if (seqAtRequest !== langSync.seq) return false;
+  const pref = normalizePref(snap?.config?.language);
+  const resolved = normalizeLang(snap?.language);
+  langSync.confirmed = { pref, resolved: resolved ?? resolveLang(pref) };
+  applyPref(pref, { persist: true, resolved });
   applyLanguage();
-  api.AppService.SetLanguage(pref).catch(() => {});
+  return true;
+}
+
+// setLanguagePref：切换偏好（后端确认后持久化）并即时重绘。返回串行链任务 Promise。
+// 流程：本地即时反馈（system 先用本地解析）→ 串行发送 SetLanguage → 以后端返回的
+// resolved 修正 UI 并持久化；失败则回滚到最近确认一致状态并可见提示。
+// 链上任务执行前/结果返回后都校验 seq：快速连点只落最后一次，迟到结果一律丢弃。
+function setLanguagePref(pref) {
+  const p = normalizePref(pref);
+  const seq = ++langSync.seq;
+  applyPref(p, { persist: false }); // 本地即时反馈；持久化等后端确认，避免失败后长期不一致
+  applyLanguage();
+  const run = async () => {
+    if (seq !== langSync.seq) return null; // 已有更新的点击：本次作废（去重）
+    try {
+      const res = await api.AppService.SetLanguage(p);
+      const rPref = normalizePref(res?.preference ?? p);
+      const rLang = normalizeLang(res?.resolved) ?? resolveLang(rPref);
+      if (seq !== langSync.seq) return null; // 迟到结果：丢弃，不覆盖新选择
+      langSync.confirmed = { pref: rPref, resolved: rLang };
+      applyPref(rPref, { persist: true, resolved: rLang });
+      applyLanguage();
+      return { pref: rPref, resolved: rLang };
+    } catch (err) {
+      if (seq !== langSync.seq) return null; // 已被更新点击取代：不回滚、不提示
+      // 持久化失败：回滚到最近确认一致状态（localStorage 只在成功后写入，未被污染）
+      const fb = langSync.confirmed ?? { pref: readStoredPref(), resolved: null };
+      applyPref(fb.pref, { persist: false, resolved: fb.resolved });
+      applyLanguage();
+      const msg = t("lang.syncFail", err?.message ?? err);
+      toast("error", msg);
+      try {
+        await api.AppService.FrontendLog("error", msg);
+      } catch {}
+      return null;
+    }
+  };
+  langSync.chain = langSync.chain.then(run, run);
+  return langSync.chain;
 }
 
 // ---------- Toast（顶部居中堆叠；info/success 3s、error 5s；同屏最多 3 条旧的先走）----------
@@ -1489,6 +1553,8 @@ function closeIconPopover(immediate) {
 function setServiceType(t, opts = {}) {
   const form = $("service-form");
   form.elements.type.value = t;
+  // ctx.type 跟随实际表单：切语言重算标题/预览时以当前协议为准（编辑 TCP→UDP 后标题回 UDP）
+  if (state.modalCtx?.kind === "service") state.modalCtx.type = t;
   document.querySelector('[data-fields="http"]').hidden = t !== "http";
   document.querySelector('[data-fields="port"]').hidden = !isPortType(t);
   document.querySelector('[data-fields="proto"]').hidden = t === "http"; // 协议选择仅端口服务可见
@@ -1525,8 +1591,16 @@ function syncServerSelect(type, preserve = false) {
     .map((s) => `<option value="${escAttr(s.id)}">${esc(s.name || serverConnAddr(s))}${state.editingId && s.id === currentId ? esc(t("pick.currentSuffix")) : ""}</option>`)
     .join("");
   let picked = "";
-  if (preserve && selected && options.some((s) => s.id === selected)) {
-    picked = selected; // 协议切换（preserve）：已选目标仍合格则保留，不丢本次手动选择
+  if (preserve) {
+    // 语言切换/协议切换重刷文案：原样保留当前选择；未选择（多项待选）保持为空，
+    // 不套用历史记忆，避免切换语言时静默改目标。仅当已选值不在合格列表时走默认逻辑。
+    if (selected && options.some((s) => s.id === selected)) {
+      picked = selected;
+    } else if (currentId && options.some((s) => s.id === currentId)) {
+      picked = currentId; // 编辑：保留归属（含原选择为空场景）
+    } else if (!selected && options.length === 1) {
+      picked = options[0].id; // 唯一合格目标自动选
+    }
   } else if (currentId && options.some((s) => s.id === currentId)) {
     picked = currentId; // 编辑：保留归属
   } else if (options.length === 1) {
@@ -2378,18 +2452,17 @@ async function boot() {
   // 初始拉取带重试：页面加载早期的绑定调用可能失败（响应丢失），指数退避重试兜底
   // （tryFetch 已提升为模块级，供更新信息拉取复用）。
   positionTabSlider(false); // 首帧无动画定位
+  const langSeqAtBoot = langSync.seq; // 快照拉取期间的用户语言改动使对齐作废
   const [snapRes, logRes, proxyRes] = await Promise.allSettled([
     tryFetch("Snapshot", () => api.AppService.Snapshot(), 4),
     tryFetch("Logs", () => api.AppService.Logs(), 4),
     tryFetch("ProxyStatuses", () => api.AppService.ProxyStatuses(), 4),
   ]);
-  // 语言对齐：后端 config.json 为权威（启动时托盘已按其取词）；本地缓存不同则跟随后端
-  const backendPref = snapRes.status === "fulfilled" ? snapRes.value?.config?.language : null;
-  if (backendPref && backendPref !== currentPref()) {
-    applyPref(backendPref, true);
-    applyLanguage();
+  if (snapRes.status === "fulfilled" && snapRes.value) {
+    // 语言对齐：后端为权威（配置偏好 + 解析后的 resolved）；拉取期间用户已切语言则不覆盖
+    reconcileLanguageFromSnapshot(snapRes.value, langSeqAtBoot);
+    applySnapshot(snapRes.value);
   }
-  if (snapRes.status === "fulfilled" && snapRes.value) applySnapshot(snapRes.value);
   if (logRes.status === "fulfilled" && logRes.value) {
     mergeLogs(logRes.value); // 合并非覆盖：拉取期间 app:logs 事件已到的更晚日志不丢
     renderLogs();
@@ -2451,9 +2524,11 @@ export const __test = {
   renderServers,
   renderStatus,
   updateMoveHint,
-  // 语言：切换/应用/取词供验证脚本直接驱动（等价点击语言按钮的完整路径）
+  // 语言：切换/应用/取词与启动对齐（供验证脚本直接驱动，等价点击语言按钮的完整路径）
   setLanguagePref,
   applyLanguage,
   applyStaticI18n,
+  reconcileLanguageFromSnapshot,
+  langSync,
   t,
 };

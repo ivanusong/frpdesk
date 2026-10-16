@@ -148,6 +148,9 @@ type Snapshot struct {
 	Config         Config         `json:"config"`
 	Status         TunnelStatus   `json:"status"`
 	ServerStatuses []ServerStatus `json:"serverStatuses"`
+	// Language 后端解析后的生效语言（"zh-CN"/"en"）：system 偏好由桌面端（后端）
+	// 统一探测，前端以该值为准——避免 WebView 与原生各自判定造成英文 UI + 中文托盘。
+	Language string `json:"language,omitempty"`
 }
 
 // Config 完整配置。servers 是连接目标的唯一有效来源；

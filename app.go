@@ -206,14 +206,23 @@ func (a *AppService) FrontendLog(level, message string) error {
 	return nil
 }
 
+// LanguageState 语言状态：绑定返回的最小契约 = 持久化偏好 + 后端解析后的生效语言。
+// 前端据此对齐 UI 语言（system 时不再自行用 navigator 独立判定）。
+type LanguageState struct {
+	Preference string `json:"preference"` // system/zh-CN/en
+	Resolved   string `json:"resolved"`   // zh-CN/en（后端系统探测结果或显式选择）
+}
+
 // SetLanguage 持久化语言偏好（system/zh-CN/en）并立即应用：更新进程 i18n、
-// 刷新托盘菜单/状态文案，并记录日志。不触碰隧道/服务器状态（不重启隧道）。
-func (a *AppService) SetLanguage(pref string) error {
+// 刷新托盘菜单/状态文案，并记录日志。返回解析后的生效语言（LanguageState）
+// 供前端对齐（system 时前端采用后端探测结果，不再自行判定）。
+// 不触碰隧道/服务器状态（不重启隧道）。
+func (a *AppService) SetLanguage(pref string) (LanguageState, error) {
 	if !i18n.IsValidPref(pref) {
-		return errors.New(i18n.T("err.invalidLanguage"))
+		return a.languageState(), errors.New(i18n.T("err.invalidLanguage"))
 	}
 	if err := a.store.SetLanguage(pref); err != nil {
-		return err
+		return a.languageState(), err
 	}
 	lang := i18n.SetPreference(pref)
 	slog.Info("[i18n] 语言已切换", "pref", pref, "lang", lang)
@@ -224,7 +233,12 @@ func (a *AppService) SetLanguage(pref string) error {
 	// （错误详情保留发生时的原文；不触碰隧道，不重连）。
 	a.tunnel.RefreshLocalizedMessages()
 	a.emitSnapshot()
-	return nil
+	return a.languageState(), nil
+}
+
+// languageState 当前语言状态（偏好 + 解析后的生效语言）。
+func (a *AppService) languageState() LanguageState {
+	return LanguageState{Preference: a.store.Language(), Resolved: string(i18n.Current())}
 }
 
 // Snapshot 返回配置 + 聚合状态 + 逐服务器状态快照（前端绑定拉取）。
@@ -261,6 +275,7 @@ func (a *AppService) buildSnapshot() configstore.Snapshot {
 		Config:         cfg,
 		Status:         configstore.AggregateStatus(list, total),
 		ServerStatuses: list,
+		Language:       string(i18n.Current()),
 	}
 }
 

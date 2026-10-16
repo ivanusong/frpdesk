@@ -12,7 +12,6 @@ package i18n
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 )
@@ -39,19 +38,6 @@ var (
 	detectOnce sync.Once // 系统语言探测只做一次（darwin 需子进程，避免重复开销）
 	detected   = EN      // 探测结果缓存
 )
-
-// langFromEnv 从标准环境变量探测语言（LC_ALL > LC_MESSAGES > LANG）。
-// 终端/开发场景可靠；GUI 场景各平台另有补充探测（见 detect_*.go）。
-func langFromEnv() Lang {
-	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
-		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
-			if l := NormalizeLang(v); l == ZH {
-				return ZH
-			}
-		}
-	}
-	return ""
-}
 
 // Current 返回当前生效语言。
 func Current() Lang {
@@ -102,12 +88,12 @@ func IsValidPref(pref string) bool {
 	}
 }
 
-// NormalizeLang 把任意 locale 标签（zh_CN / zh-Hans-CN@… / en_US …）归一为
-// 支持的语言：zh 开头 → ZH，其他 → EN（其他语言回退英文）。
+// NormalizeLang 把任意 locale 标签（zh_CN / zh-Hans-CN@rg=… / en_US.UTF-8 / C …）
+// 归一为支持的语言：zh 开头 → ZH，其他（含未知/C/POSIX）→ EN（其他语言回退英文）。
 func NormalizeLang(locale string) Lang {
 	s := strings.TrimSpace(locale)
-	if i := strings.IndexByte(s, '@'); i >= 0 {
-		s = s[:i]
+	if i := strings.IndexAny(s, ".@"); i >= 0 {
+		s = s[:i] // 去代码集（.UTF-8）与修饰符（@rg=…）
 	}
 	s = strings.ReplaceAll(s, "_", "-")
 	if strings.EqualFold(strings.SplitN(s, "-", 2)[0], "zh") {

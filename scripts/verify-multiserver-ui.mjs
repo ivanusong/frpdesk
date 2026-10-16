@@ -44,7 +44,7 @@ class El {
     this._class = new Set();
     this._text = "";
     this.hidden = false;
-    this.value = "";
+    this._value = "";
     this.checked = false;
     this.disabled = false;
     this.scrollTop = 0;
@@ -186,6 +186,13 @@ class El {
     };
     walk(this);
     return map;
+  }
+  // 真实 DOM 语义：value 始终为字符串（openServiceModal 回填数字也能与字符串断言比较）
+  get value() {
+    return this._value ?? "";
+  }
+  set value(v) {
+    this._value = String(v ?? "");
   }
   focus() {
     globalThis.__lastFocus = this;
@@ -383,12 +390,14 @@ function makeSnapshot(over = {}) {
     { id: "svc2", name: "SSH", type: "tcp", subdomain: "", localHost: "127.0.0.1", localPort: 22, remotePort: 36000, enabled: true, serverId: "srvB", icon: "🔌" },
   ];
   return {
-    config: { servers, services, global: { serverAddr: "", serverPort: 0, authToken: "", httpEnabled: false, baseDomain: "", scheme: "", publicPort: 0 } },
+    config: { servers, services, language: over.language ?? "zh-CN", global: { serverAddr: "", serverPort: 0, authToken: "", httpEnabled: false, baseDomain: "", scheme: "", publicPort: 0 } },
     status: { state: over.state ?? "running", message: "", startedAt: new Date().toISOString(), runningCount: over.runningCount ?? 1, totalCount: over.totalCount ?? 2, activeCount: over.activeCount ?? 1, failedCount: over.failedCount ?? 0 },
     serverStatuses: over.serverStatuses ?? [
       { serverId: "srvA", state: "running", message: "", startedAt: new Date().toISOString() },
       { serverId: "srvB", state: "stopped", message: "", startedAt: "" },
     ],
+    // 后端解析后的生效语言（system 偏好的权威结果）：显式传入 over.resolvedLanguage
+    language: over.resolvedLanguage ?? "zh-CN",
   };
 }
 let currentSnapshot = makeSnapshot();
@@ -436,8 +445,22 @@ const appStub = {
     return Promise.resolve(over ?? { success: true, message: "", latencyMs: 42 });
   },
   QRCode: () => Promise.resolve("data:image/png;base64,x"),
-  // 语言绑定：记录调用供断言（真实后端同步持久化并刷新托盘）
-  SetLanguage: (...a) => Promise.resolve(appStub.record("SetLanguage", a)),
+  // 语言绑定：返回 { preference, resolved } 最小契约；记录调用供断言。
+  // 可用 appStub.langSystemResolved 指定 system 的后端解析结果（默认 en，
+  // 与本机 Node 本地解析可能不同，用于验证前端采用后端 resolved 而不自行判定）。
+  // appStub.results.SetLanguage 可设 {__pending:Promise} 延迟或 "reject" 失败。
+  langSystemResolved: "en",
+  languageState(pref) {
+    const p = ["system", "zh-CN", "en"].includes(pref) ? pref : "system";
+    return { preference: p, resolved: p === "system" ? appStub.langSystemResolved : p };
+  },
+  SetLanguage: (...a) => {
+    appStub.calls.push({ name: "SetLanguage", args: a });
+    const over = appStub.results.SetLanguage;
+    if (over === "reject") return Promise.reject(new Error("语言保存失败"));
+    if (over && over.__pending) return over.__pending.then(() => appStub.languageState(a[0]));
+    return Promise.resolve(appStub.languageState(a[0]));
+  },
 };
 globalThis.__wailsApi = { AppService: appStub };
 
@@ -966,9 +989,10 @@ await sleep(30);
 check("RPC 异常：toast 失败原因且按钮恢复", lastToast().includes("测试连接失败") && lastToast().includes("RPC 断开") && testBtnOf().textContent === "测试" && !testBtnOf().disabled);
 delete appStub.results.TestServerConnection;
 
-// ---------- 场景 S10：双语切换、回退与静态/动态渲染 ----------
-// 预置 zh-CN（同 harness 初始化），先验证初始状态，再切 EN 验证静态+动态全量重绘，
-// 最后验证模态打开时切语言不丢输入、非法偏好回退 system、业务调用不被触发。
+// ---------- 场景 S10：双语切换、回退、写入生命周期与动态渲染 ----------
+// 预置 zh-CN（同 harness 初始化 + 快照 language 字段）；覆盖：
+// 静态/动态全量重绘、后端 resolved 对齐、串行/去重/迟到丢弃、失败回滚、
+// 启动快照对齐（过期/缺失字段）、模态动态文案（协议/空状态/（当前）后缀）。
 const langSnap = makeSnapshot({
   services: [{ id: "svc1", name: "博客", type: "http", subdomain: "blog", localHost: "127.0.0.1", localPort: 8080, remotePort: 0, enabled: true, serverId: "srvA", icon: "🌐" }],
   serverStatuses: [
@@ -979,55 +1003,161 @@ const langSnap = makeSnapshot({
 await T.applySnapshot(langSnap);
 // 注册事件：让卡片出现「已注册」徽章（徽章文案双语断言需要可预期的 proxy 状态）
 wailsListeners["app:proxies"][0]({ data: [{ serviceId: "svc1", state: "registered" }] });
+const bizCount = () => appStub.calls.filter((c) => ["SetServiceEnabled", "CreateService", "UpdateService", "DeleteService", "CreateServer", "UpdateServer", "DeleteServer"].includes(c.name)).length;
 check("S10 初始：偏好 zh-CN 且 html lang=zh-CN", storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN", String(document.documentElement.lang));
 const tabTunnels = document.querySelector('.tab[data-tab="tunnels"]');
 check("S10 初始：静态 Tab 为中文且语言按钮 tip 可读", tabTunnels.textContent === "隧道" && (document.getElementById("btn-lang").title || "").includes("语言："), document.getElementById("btn-lang").title);
 
 // 记录切换前业务调用数：切语言绝不能触发隧道/服务 RPC
-const bizBefore = appStub.calls.filter((c) => ["SetServiceEnabled", "CreateService", "UpdateService", "DeleteService", "CreateServer", "UpdateServer", "DeleteServer"].includes(c.name)).length;
+const bizBefore = bizCount();
 
-T.setLanguagePref("en");
-await sleep(20);
+await T.setLanguagePref("en");
 check("S10 切英文：html lang 与 localStorage 持久化", document.documentElement.lang === "en" && storage.get("frpdesk.language") === "en");
 check("S10 切英文：静态文案（Tab/按钮/空态属性）", tabTunnels.textContent === "Tunnels" && document.getElementById("btn-add-http").textContent.includes("Add HTTP") && document.getElementById("service-empty").textContent.includes("No tunnels yet"));
 check("S10 切英文：动态状态栏", document.getElementById("status-label").textContent === "Connected" && document.getElementById("service-count").title === "Currently mapped tunnels", `${document.getElementById("status-label").textContent} / ${document.getElementById("service-count").title}`);
 check("S10 切英文：动态卡片操作/徽章", document.querySelector("#service-list .service-item .svc-op--r1")?.getAttribute("title") === "Edit" && document.querySelector("#service-list .service-item .tag-ok")?.textContent === "Registered", `${document.querySelector("#service-list .service-item .svc-op--r1")?.getAttribute("title")} / ${document.querySelector("#service-list .service-item .tag")?.textContent}`);
 check("S10 切英文：服务器卡操作文案", document.querySelector('#server-list .server-item .btn[data-act="srv-test"]')?.textContent === "Test" && document.querySelector("#server-list .server-item")?.textContent.includes("tunnel(s) linked"), `${document.querySelector('#server-list .server-item .btn[data-act="srv-test"]')?.textContent} / ${document.querySelector("#server-list .server-item")?.textContent}`);
 check("S10 切英文：后端同步 SetLanguage(en)", appStub.calls.filter((c) => c.name === "SetLanguage").at(-1)?.args?.[0] === "en");
-check("S10 切英文：不触发任何隧道/配置业务调用", appStub.calls.filter((c) => ["SetServiceEnabled", "CreateService", "UpdateService", "DeleteService", "CreateServer", "UpdateServer", "DeleteServer"].includes(c.name)).length === bizBefore);
+check("S10 切英文：不触发任何隧道/配置业务调用", bizCount() === bizBefore);
 
-// 动态插值：英文提示串（HTTP 空前缀自动生成子域名）
+// 语言按钮接线：zh-CN→en（已就位）→ system（后端 resolved）→ zh-CN
+document.getElementById("btn-lang").click();
+await sleep(20);
+check("S10 按钮循环：en → system（采用后端 resolved=en）", storage.get("frpdesk.language") === "system" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels", `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`);
+document.getElementById("btn-lang").click();
+await sleep(20);
+check("S10 按钮循环：system → zh-CN", storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN" && tabTunnels.textContent === "隧道");
+
+// ---------- S10a：system 采用后端 resolved（不自行判定） ----------
+appStub.langSystemResolved = "en"; // 后端判定 en（本机 Node 前端解析可能不同）
+await T.setLanguagePref("system");
+check(
+  "S10a system 采用后端 resolved=en（前后端一致）",
+  storage.get("frpdesk.language") === "system" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels",
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`,
+);
+appStub.langSystemResolved = "zh-CN";
+await T.setLanguagePref("system");
+check("S10a system 后端 resolved=zh-CN 时随其后端", storage.get("frpdesk.language") === "system" && document.documentElement.lang === "zh-CN" && tabTunnels.textContent === "隧道");
+appStub.langSystemResolved = "en";
+
+// ---------- S10b：写入串行/去重与迟到结果丢弃 ----------
+// 同 tick 连点：中间值去重跳过，只执行最后一次
+const beforeDedupe = appStub.calls.filter((c) => c.name === "SetLanguage").length;
+await Promise.all([T.setLanguagePref("en"), T.setLanguagePref("zh-CN"), T.setLanguagePref("en")]);
+check(
+  "S10b 同 tick 连点只发最后一次写入（去重）",
+  appStub.calls.filter((c) => c.name === "SetLanguage").length === beforeDedupe + 1 && appStub.calls.filter((c) => c.name === "SetLanguage").at(-1)?.args?.[0] === "en",
+  `calls=${appStub.calls.filter((c) => c.name === "SetLanguage").length - beforeDedupe}`,
+);
+// 在途响应迟到：先点 en（RPC 挂起）再点 zh；en 返回时必须丢弃，不覆盖中文
+let releaseLang;
+appStub.results.SetLanguage = { __pending: new Promise((r) => (releaseLang = r)) };
+const pEn = T.setLanguagePref("en");
+await sleep(10); // 让 en 的 RPC 确实发出
+const pZh = T.setLanguagePref("zh-CN");
+releaseLang();
+await Promise.all([pEn, pZh]);
+check("S10b 迟到 en 结果不覆盖后续中文选择", document.documentElement.lang === "zh-CN" && storage.get("frpdesk.language") === "zh-CN" && tabTunnels.textContent === "隧道", `lang=${document.documentElement.lang} store=${storage.get("frpdesk.language")}`);
+check("S10b 后端最终收到最新一次写入（zh-CN）", appStub.calls.filter((c) => c.name === "SetLanguage").at(-1)?.args?.[0] === "zh-CN");
+delete appStub.results.SetLanguage;
+
+// ---------- S10c：持久化失败 → 可见错误 + 回滚到最近确认一致 ----------
+await T.setLanguagePref("zh-CN"); // 确认 zh-CN 为基准
+const bizBeforeFail = bizCount();
+appStub.results.SetLanguage = "reject";
+await T.setLanguagePref("en");
+check("S10c 失败可见：toast 提示语言未保存", lastToast().includes("语言偏好未保存"), lastToast());
+check(
+  "S10c 失败回滚：UI 与 localStorage 保持最近确认的 zh-CN",
+  document.documentElement.lang === "zh-CN" && storage.get("frpdesk.language") === "zh-CN" && tabTunnels.textContent === "隧道",
+  `lang=${document.documentElement.lang} store=${storage.get("frpdesk.language")}`,
+);
+check("S10c 失败不触发业务 RPC", bizCount() === bizBeforeFail);
+delete appStub.results.SetLanguage;
+
+// ---------- S10d：启动快照对齐（后端权威 / 过期丢弃 / 缺失字段按 system） ----------
+const appliedEn = T.reconcileLanguageFromSnapshot(makeSnapshot({ language: "en", resolvedLanguage: "en" }), T.langSync.seq);
+check("S10d 快照对齐：采用后端偏好与 resolved", appliedEn === true && document.documentElement.lang === "en" && storage.get("frpdesk.language") === "en");
+// 拉取期间用户已改语言：旧快照不得覆盖
+const staleSeq = T.langSync.seq;
+const staleWrite = T.setLanguagePref("zh-CN");
+const appliedStale = T.reconcileLanguageFromSnapshot(makeSnapshot({ language: "en", resolvedLanguage: "en" }), staleSeq);
+await staleWrite;
+check("S10d 过期快照不覆盖刚切的中文", appliedStale === false && document.documentElement.lang === "zh-CN" && storage.get("frpdesk.language") === "zh-CN");
+// 快照缺 language 字段：按 system 权威对齐（不保留本地显式选择）
+await T.setLanguagePref("en");
+const appliedMissing = T.reconcileLanguageFromSnapshot({ config: { servers: [], services: [] } }, T.langSync.seq);
+check(
+  "S10d 缺失 language 字段按 system 权威对齐",
+  appliedMissing === true && storage.get("frpdesk.language") === "system" && ["zh-CN", "en"].includes(document.documentElement.lang),
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`,
+);
+await T.setLanguagePref("zh-CN");
+
+// ---------- S10e：模态动态文案（插值/协议切换/空状态/（当前）后缀） ----------
 T.openServiceModal("ignored", null, "http");
-const form = document.getElementById("service-form");
-form.elements.name.value = "keep-me";
-form.elements.subdomain.value = "";
-form.elements.subdomain.dispatchEvent({ type: "input", bubbles: true });
+const langForm = document.getElementById("service-form");
+const langSel = document.getElementById("svc-server-select");
+langForm.elements.name.value = "keep-me";
+langForm.elements.subdomain.value = "";
+langForm.elements.subdomain.dispatchEvent({ type: "input", bubbles: true });
+await T.setLanguagePref("en");
 const enHint = document.getElementById("svc-move-hint").textContent;
-check("S10 英文插值：自动生成子域名提示", enHint.includes("subdomain") && enHint.includes("generated on save") && !enHint.includes("{0}"), enHint);
-check("S10 英文插值：子域名占位符英文", enHint.includes("<subdomain>"), enHint);
-// 模态打开时切回中文：标题随语言、表单输入保留、模态保持打开
+check("S10e 英文插值：自动生成子域名提示", enHint.includes("subdomain") && enHint.includes("generated on save") && !enHint.includes("{0}"), enHint);
+check("S10e 英文插值：子域名占位符英文", enHint.includes("<subdomain>"), enHint);
 T.setLanguagePref("zh-CN");
 await sleep(20);
-check("S10 模态切语言：标题随语言且输入不丢", document.getElementById("modal-title").textContent === "新增 HTTP 服务" && form.elements.name.value === "keep-me" && document.getElementById("service-modal").hidden === false);
+check("S10e 模态切语言：标题随语言且输入不丢", document.getElementById("modal-title").textContent === "新增 HTTP 服务" && langForm.elements.name.value === "keep-me" && document.getElementById("service-modal").hidden === false);
 T.closeServiceModal();
 await sleep(450);
 
-// 语言按钮点击循环：zh-CN → en → system（system 在 Node 下解析为 en）
-document.getElementById("btn-lang").click();
-await sleep(20);
-check("S10 按钮循环：zh-CN → en", storage.get("frpdesk.language") === "en" && document.documentElement.lang === "en");
-document.getElementById("btn-lang").click();
-await sleep(20);
-// system 解析为宿主系统语言（Node 由 ICU 提供 navigator.language，可能 zh-CN 或 en）：
-// 断言解析合法且与词典取词一致（中文系统→简中，其他→英文）。
-const sysLang = document.documentElement.lang;
-const sysLabel = document.querySelector('.tab[data-tab="tunnels"]').textContent;
-check("S10 按钮循环：en → system（解析为系统语言）", storage.get("frpdesk.language") === "system" && ["zh-CN", "en"].includes(sysLang) && (sysLang === "zh-CN" ? sysLabel === "隧道" : sysLabel === "Tunnels"), `store=${storage.get("frpdesk.language")} lang=${sysLang} tab=${sysLabel}`);
-check("S10 后端同步：system 偏好原样上报", appStub.calls.filter((c) => c.name === "SetLanguage").at(-1)?.args?.[0] === "system");
-// 回到中文收尾（不影响后续断言）
-T.setLanguagePref("zh-CN");
-await sleep(20);
+// 编辑 TCP→UDP 后切语言：标题跟随实际表单协议，hint/输入/目标选择全部保留
+const tcpSnap = makeSnapshot({
+  services: [{ id: "svcT", name: "端口", type: "tcp", subdomain: "", localHost: "127.0.0.1", localPort: 22, remotePort: 36022, enabled: true, serverId: "srvB", icon: "" }],
+});
+await T.applySnapshot(tcpSnap);
+T.openServiceModal("ignored", tcpSnap.config.services[0]);
+const langProtoSel = document.getElementById("svc-proto-select");
+langProtoSel.value = "udp";
+langProtoSel.dispatchEvent({ type: "change", bubbles: true });
+await T.setLanguagePref("en");
+check(
+  "S10e 编辑 TCP→UDP 后切语言：标题随实际协议（Edit UDP）",
+  document.getElementById("modal-title").textContent === "Edit UDP tunnel" && langForm.elements.type.value === "udp" && langForm.elements.remotePort.value === "36022" && langSel.value === "srvB",
+  `${document.getElementById("modal-title").textContent} / type=${langForm.elements.type.value} / port=${langForm.elements.remotePort.value} / srv=${langSel.value}`,
+);
+check("S10e 协议切换后 hint 为英文且保留地址预览", document.getElementById("svc-move-hint").textContent.includes("Access address"), document.getElementById("svc-move-hint").textContent);
+await T.setLanguagePref("zh-CN");
+check("S10e 切回中文：编辑 UDP 标题且选择不丢", document.getElementById("modal-title").textContent === "编辑 UDP 服务" && langSel.value === "srvB" && langForm.elements.remotePort.value === "36022");
+T.closeServiceModal();
+await sleep(450);
+
+// 无合格目标：select 空状态文案随语言刷新
+const emptySnap = makeSnapshot({ servers: [], services: [] });
+await T.applySnapshot(emptySnap);
+T.openServiceModal("ignored", null, "http");
+check("S10e 空状态初始为中文", langSel.innerHTML.includes("暂无支持 HTTP") && langSel.disabled === true, langSel.innerHTML);
+await T.setLanguagePref("en");
+check("S10e 空状态随语言刷新为英文", langSel.innerHTML.includes("No HTTP-capable Frps configuration") && langSel.disabled === true, langSel.innerHTML);
+T.closeServiceModal();
+await sleep(450);
+
+// 编辑不可用合格目标（HTTP 服务指向未开启 HTTP 的服务器）：「（当前）」后缀随语言
+await T.setLanguagePref("zh-CN");
+const curSnap = makeSnapshot({
+  services: [{ id: "svcCur", name: "博客", type: "http", subdomain: "blog", localHost: "127.0.0.1", localPort: 8080, remotePort: 0, enabled: true, serverId: "srvB", icon: "🌐" }],
+});
+await T.applySnapshot(curSnap);
+T.openServiceModal("ignored", curSnap.config.services[0]);
+check("S10e （当前）后缀初始为中文且归属保留", langSel.innerHTML.includes("（当前）") && langSel.value === "srvB", `${langSel.innerHTML} / ${langSel.value}`);
+await T.setLanguagePref("en");
+check("S10e （当前）后缀随语言刷为英文且选择不丢", langSel.innerHTML.includes("(current)") && !langSel.innerHTML.includes("（当前）") && langSel.value === "srvB", `${langSel.innerHTML} / ${langSel.value}`);
+T.closeServiceModal();
+await sleep(450);
+await T.setLanguagePref("zh-CN");
 check("S10 收尾：恢复中文", document.documentElement.lang === "zh-CN" && document.getElementById("status-label").textContent === "已连接");
+check("S10 全程不触发任何隧道/配置业务调用", bizCount() === bizBefore, `biz=${bizCount()} before=${bizBefore}`);
 
 // ---------- 服务器卡片专用 CSS ----------
 check("服务器卡无 hover 隐藏/translate 残留", !css.includes(".server-item .svc-op"));
