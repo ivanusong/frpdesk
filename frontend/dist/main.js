@@ -453,17 +453,25 @@ function dismissToast(el) {
 // ---------- 表单小问号帮助 tooltip（hover/focus 延迟 400ms；单例元素，随语言重绘）----------
 
 const FIELD_TIP_DELAY = 400;
-const fieldTipState = { anchor: null, timer: 0 };
+const FIELD_TIP_EXIT_MS = 150; // 与 style.css 中 .field-tip 退出过渡时长一致
+const fieldTipState = { anchor: null, timer: 0, hideTimer: 0 };
 
-// showFieldTip：填充帮助文案并显示；位置按锚点按钮计算（视口内夹紧）
+// showFieldTip：填充帮助文案并显示；吸附锚点后加 .is-open 触发进入动画（位移 + 淡入）
 function showFieldTip(anchor) {
   const tip = $("field-tip");
   if (!tip || !anchor?.dataset?.help) return;
   fieldTipState.timer = 0;
   fieldTipState.anchor = anchor;
+  if (fieldTipState.hideTimer) {
+    clearTimeout(fieldTipState.hideTimer); // 退出动画期间再次展示：取消隐藏并回到进入动画
+    fieldTipState.hideTimer = 0;
+  }
   tip.textContent = t(anchor.dataset.help);
   tip.hidden = false;
   positionFieldTip(tip, anchor);
+  tip.classList.remove("is-open");
+  void tip.offsetWidth; // 强制回流：保证复用的 tooltip 每次都从偏移态过渡到展开态
+  tip.classList.add("is-open");
 }
 
 // scheduleFieldTip：延迟展示（hover/focus 共用），先收起当前 tooltip 并清旧定时器
@@ -473,7 +481,7 @@ function scheduleFieldTip(anchor) {
   fieldTipState.timer = setTimeout(() => showFieldTip(anchor), FIELD_TIP_DELAY);
 }
 
-// hideFieldTip：立即隐藏（含未到延迟的待展示）
+// hideFieldTip：取消待展示并播放退出动画（位移 + 淡出），动画结束（FIELD_TIP_EXIT_MS）后置 hidden
 function hideFieldTip() {
   if (fieldTipState.timer) {
     clearTimeout(fieldTipState.timer);
@@ -481,10 +489,24 @@ function hideFieldTip() {
   }
   fieldTipState.anchor = null;
   const tip = $("field-tip");
-  if (tip) tip.hidden = true;
+  if (!tip) return;
+  if (fieldTipState.hideTimer) {
+    clearTimeout(fieldTipState.hideTimer);
+    fieldTipState.hideTimer = 0;
+  }
+  if (tip.hidden) {
+    tip.classList.remove("is-open");
+    return; // 未展示过：无需等退出动画
+  }
+  tip.classList.remove("is-open"); // 触发退出过渡
+  fieldTipState.hideTimer = setTimeout(() => {
+    fieldTipState.hideTimer = 0;
+    if (!tip.classList.contains("is-open")) tip.hidden = true; // 期间未重新展示才真正隐藏
+  }, FIELD_TIP_EXIT_MS);
 }
 
-// positionFieldTip：优先锚点下方，底部放不下时翻到上方；左右在视口内夹紧
+// positionFieldTip：优先锚点下方，底部放不下时翻到上方；左右在视口内夹紧。
+// is-above 标记翻转方向，供 CSS 关联 transform-origin（上方 bottom center / 下方 top center）
 function positionFieldTip(tip, anchor) {
   const vw = window.innerWidth || 0;
   const vh = window.innerHeight || 0;
@@ -495,16 +517,20 @@ function positionFieldTip(tip, anchor) {
   const w = tip.offsetWidth;
   const h = tip.offsetHeight;
   const left = Math.max(margin, Math.min(rect.left + rect.width / 2 - w / 2, vw - w - margin));
-  const top = rect.bottom + gap + h > vh - margin ? Math.max(margin, rect.top - gap - h) : rect.bottom + gap;
+  const above = rect.bottom + gap + h > vh - margin;
+  const top = above ? Math.max(margin, rect.top - gap - h) : rect.bottom + gap;
   tip.style.left = `${Math.round(left)}px`;
   tip.style.top = `${Math.round(top)}px`;
+  tip.classList.toggle("is-above", above);
 }
 
-// refreshFieldTipI18n：语言切换时重绘已展开的说明（按钮 aria 由 applyStaticI18n 刷新）
+// refreshFieldTipI18n：语言切换时重绘已展开的说明（按钮 aria 由 applyStaticI18n 刷新）；
+// 详文案长度会改变 tooltip 尺寸，重绘后必须重新定位，避免英文文案越出视口
 function refreshFieldTipI18n() {
   const tip = $("field-tip");
   if (!tip || tip.hidden || !fieldTipState.anchor) return;
   tip.textContent = t(fieldTipState.anchor.dataset.help);
+  positionFieldTip(tip, fieldTipState.anchor);
 }
 
 // ---------- 主题（三态：system / light / dark，localStorage 记忆）----------

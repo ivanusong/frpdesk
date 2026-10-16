@@ -1574,16 +1574,19 @@ check(
 // ---------- S13：表单小问号帮助（短标题 + 延迟 tooltip + 语言同步） ----------
 await T.setLanguagePref("zh-CN");
 
-// 静态结构：六个长解释字段均为「短标题 + 小问号」；HTTP 常驻 hint 行已移除
+// 静态结构：八处长解释字段均为「短标题 + 小问号」；HTTP 常驻 hint 行已移除；
+// authToken 的可选性用可见短标记（badge）表达，不写回长括号标题
 const helpBtnOf = (formId, name) =>
   document.querySelector(`#${formId} [name="${name}"]`)?.closest("label")?.querySelector(".field-help") ?? null;
 const fieldTitleOf = (formId, name) =>
   document.querySelector(`#${formId} [name="${name}"]`)?.closest("label")?.querySelector(".field-title")?.textContent ?? "";
 const HELP_CASES = [
+  ["service-form", "localHost", "本地 IP", "form.localIPHelp", "本地 IP 说明"],
   ["service-form", "subdomain", "子域名前缀", "form.subdomainHelp", "子域名前缀说明"],
   ["service-form", "remotePort", "远程端口", "form.remotePortHelp", "远程端口说明"],
   ["server-form", "authToken", "authToken", "srvForm.authTokenHelp", "authToken 说明"],
   ["server-form", "baseDomain", "根域名", "srvForm.baseDomainHelp", "根域名说明"],
+  ["server-form", "scheme", "访问协议", "srvForm.schemeHelp", "访问协议说明"],
   ["server-form", "publicPort", "访问端口", "srvForm.publicPortHelp", "访问端口说明"],
 ];
 const helpCaseBad = HELP_CASES.filter(([formId, name, title, help, aria]) => {
@@ -1600,9 +1603,23 @@ const helpCaseBad = HELP_CASES.filter(([formId, name, title, help, aria]) => {
   );
 });
 check(
-  "S13 静态结构：五处字段为短标题 + 小问号（data-help/aria/type=button/svg）",
+  "S13 静态结构：七处字段为短标题 + 小问号（data-help/aria/type=button/svg）",
   helpCaseBad.length === 0,
   helpCaseBad.map(([f, n]) => `${f}.${n}`).join(", "),
+);
+// authToken：短标题保持，可选性由可见的独立轻量 badge 表达（不是长括号文案、不是只在 tooltip 里提）
+const authLabel = document.querySelector('#server-form [name="authToken"]').closest("label");
+const authBadge = authLabel?.querySelector(".field-badge");
+check(
+  "S13 authToken：短标题旁有可见「可选」badge",
+  fieldTitleOf("server-form", "authToken") === "authToken" &&
+    authBadge?.textContent === "可选" &&
+    authBadge?.getAttribute("data-i18n") === "srvForm.authTokenBadge" &&
+    /[（(]/.test(authLabel.querySelector(".field-title")?.textContent ?? "") === false &&
+    /[（(]/.test(authBadge.textContent) === false &&
+    /\.field-badge\s*\{[^}]*flex-shrink:\s*0/.test(css) &&
+    /\.field-badge\s*\{[^}]*border-radius:\s*999px/.test(css),
+  `title=${fieldTitleOf("server-form", "authToken")} badge=${authBadge?.textContent}`,
 );
 const toggleHelp = document.querySelector("#server-form .server-http-toggle-head .field-help");
 check(
@@ -1615,29 +1632,60 @@ check(
   `toggleHelp=${Boolean(toggleHelp)} hint=${Boolean(document.querySelector(".server-http-toggle-hint"))}`,
 );
 
-// 布局结构：两列 form-row 保持两列；字段标题行与 input 同级（图标不占输入框宽度）
+// 布局结构：两列 form-row 保持两列；新增小问号字段的标题行与 input/select 同级（图标不占控件宽度）
 const portLabel = document.querySelector('#server-form [name="publicPort"]').closest("label");
 const portRow = portLabel.parent;
+const localIpLabel = document.querySelector('#service-form [name="localHost"]').closest("label");
+const schemeLabel = document.querySelector('#server-form [name="scheme"]').closest("label");
 check(
-  "S13 两列 form-row 结构不破坏：字段标题行与 input 同级、图标在标题行内",
+  "S13 两列 form-row 结构不破坏：字段标题行与 input/select 同级、图标在标题行内",
   portRow.classList.contains("form-row") &&
     portRow.children.filter((c) => c.tagName === "LABEL").length === 2 &&
     portLabel.children.length === 2 &&
     portLabel.children[0].classList.contains("field-head") &&
     portLabel.children[1].tagName === "INPUT" &&
-    Boolean(portLabel.querySelector(".field-head .field-help")),
+    Boolean(portLabel.querySelector(".field-head .field-help")) &&
+    localIpLabel.children.length === 2 &&
+    localIpLabel.children[0].classList.contains("field-head") &&
+    localIpLabel.children[1].tagName === "INPUT" &&
+    localIpLabel.parent.classList.contains("form-row") &&
+    localIpLabel.parent.children.filter((c) => c.tagName === "LABEL").length === 2 &&
+    schemeLabel.children.length === 2 &&
+    schemeLabel.children[0].classList.contains("field-head") &&
+    schemeLabel.children[1].classList.contains("select-wrap") &&
+    schemeLabel.parent.classList.contains("form-row") &&
+    schemeLabel.parent.children.filter((c) => c.tagName === "LABEL").length === 2,
 );
+// reduced-motion 块：缩进结束的 } 收束媒体查询块（内含缩进的规则体）
+const reducedBlocks = [...css.matchAll(/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\n\}/g)].map((m) => m[0]);
+const fieldReduced = reducedBlocks.find((b) => b.includes(".field-help") && b.includes(".field-tip")) ?? "";
 check(
-  "S13 CSS：短标题不换行 / 问号弱化 hover primary / tooltip 固定定位且弹窗仍 400px",
+  "S13 CSS：短标题不换行 / 问号 hover 微放大 / tooltip 磨砂 + 进出场动画 + 宽度放宽",
   /\.field-title\s*\{[^}]*white-space:\s*nowrap/.test(css) &&
     /\.field-help\s*\{[^}]*color:\s*var\(--text-3\)/.test(css) &&
-    /\.field-help:hover\s*\{[^}]*color:\s*var\(--primary\)/.test(css) &&
+    /\.field-help\s*\{[^}]*transition:[^;]*transform\s+1[23]\dms/.test(css) &&
+    /\.field-help:hover\s*\{[^}]*color:\s*var\(--primary\)[^}]*transform:\s*scale\(1\.08\)/.test(css) &&
     /\.field-tip\s*\{[^}]*position:\s*fixed/.test(css) &&
-    /\.field-tip\s*\{[^}]*max-width:\s*260px/.test(css) &&
+    /\.field-tip\s*\{[^}]*max-width:\s*300px/.test(css) &&
+    /\.field-tip\s*\{[^}]*border:\s*1px solid color-mix\([^;]*transparent\)/.test(css) &&
+    /\.field-tip\s*\{[^}]*background:\s*color-mix\([^;]*transparent\)/.test(css) &&
+    css.includes("-webkit-backdrop-filter: blur(12px) saturate(1.4);") &&
+    css.includes("backdrop-filter: blur(12px) saturate(1.4);") &&
+    css.includes("transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);") &&
+    /\.field-tip\s*\{[^}]*transform-origin:\s*top center/.test(css) &&
+    /\.field-tip\.is-above\s*\{[^}]*transform-origin:\s*bottom center/.test(css) &&
+    /\.field-tip\.is-open\s*\{[^}]*opacity:\s*1/.test(css) &&
     /\.modal-panel\s*\{[^}]*width:\s*min\(400px/.test(css),
 );
+check(
+  "S13 CSS：reduced-motion 下问号与 tooltip 动效可关",
+  fieldReduced.includes(".field-help") &&
+    fieldReduced.includes("transition: none;") &&
+    /\.field-tip\s*\{[^}]*transform:\s*none/.test(fieldReduced) &&
+    /\.field-tip\s*\{[^}]*transition:\s*opacity 150ms linear/.test(fieldReduced),
+);
 
-// 交互：hover 延迟 400ms 展示；移开立即隐藏；focus 同样延迟可达
+// 交互：hover 延迟 400ms 展示；移开/失焦播放 150ms 退出动画；focus 同样延迟可达
 T.openServerModal(null);
 await sleep(30);
 const tipEl = document.getElementById("field-tip");
@@ -1646,32 +1694,174 @@ authHelp.dispatchEvent({ type: "pointerenter", bubbles: true });
 check("S13 hover 延迟未到：tooltip 不显示", tipEl.hidden === true && tipEl.textContent === "");
 await sleep(460);
 check(
-  "S13 hover 约 400ms 后：tooltip 显示中文详情",
-  tipEl.hidden === false && tipEl.textContent === "可留空" && tipEl.getAttribute("role") === "tooltip",
+  "S13 hover 约 400ms 后：tooltip 显示完整中文详情并进入 is-open",
+  tipEl.hidden === false &&
+    tipEl.classList.contains("is-open") &&
+    tipEl.textContent === T.t("srvForm.authTokenHelp") &&
+    tipEl.textContent.includes("控制连接") &&
+    tipEl.getAttribute("role") === "tooltip",
   `${tipEl.hidden} / ${tipEl.textContent}`,
 );
 authHelp.dispatchEvent({ type: "pointerleave", bubbles: true });
-check("S13 移开：tooltip 立即隐藏", tipEl.hidden === true);
+check(
+  "S13 移开：立即退出 is-open（播放 150ms 淡出，尚未 hidden）",
+  tipEl.hidden === false && !tipEl.classList.contains("is-open"),
+  `hidden=${tipEl.hidden} is-open=${tipEl.classList.contains("is-open")}`,
+);
+await sleep(200);
+check("S13 退出动画结束（150ms 后）：tooltip 真正隐藏", tipEl.hidden === true);
 
 authHelp.dispatchEvent({ type: "focus" });
 check("S13 focus 延迟未到：不显示", tipEl.hidden === true);
 await sleep(460);
-check("S13 focus 约 400ms 后：键盘可达显示", tipEl.hidden === false && tipEl.textContent === "可留空");
+check(
+  "S13 focus 约 400ms 后：键盘可达显示",
+  tipEl.hidden === false && tipEl.classList.contains("is-open") && tipEl.textContent === T.t("srvForm.authTokenHelp"),
+);
 
-// 语言切换：已展开的 tooltip 文案与按钮 aria 同步刷新
+// 快速 hover 离开后立即重进（退出动画期间，旧 hide timer 尚未到期）
+// 旧 hide timer 不得把重新展示的 tooltip 隐藏，也不得在其后残留再隐
+authHelp.dispatchEvent({ type: "pointerleave", bubbles: true });
+await sleep(50);
+authHelp.dispatchEvent({ type: "pointerenter", bubbles: true });
+await sleep(500); // 越过旧 hide timer(150ms) 与新的展示延迟(400ms)
+check(
+  "S13 快速离开后立即重进：旧 hide timer 不隐藏重新展示的 tooltip",
+  tipEl.hidden === false && tipEl.classList.contains("is-open") && tipEl.textContent === T.t("srvForm.authTokenHelp"),
+  `hidden=${tipEl.hidden} is-open=${tipEl.classList.contains("is-open")}`,
+);
+await sleep(200);
+check(
+  "S13 快速重进后：无遗留 hide timer 再次隐藏（200ms 后仍可见）",
+  tipEl.hidden === false && tipEl.classList.contains("is-open"),
+  `hidden=${tipEl.hidden} is-open=${tipEl.classList.contains("is-open")}`,
+);
+
+// 语言切换：已展开的 tooltip 文案、按钮 aria 与可见「可选」标记同步刷新
 await T.setLanguagePref("en");
 check(
-  "S13 切英文：tooltip 文案与按钮 aria 同步刷新",
+  "S13 切英文：tooltip 文案、按钮 aria 与「可选」标记同步刷新",
   tipEl.hidden === false &&
-    tipEl.textContent === "Optional" &&
+    tipEl.textContent === T.t("srvForm.authTokenHelp") &&
+    tipEl.textContent.includes("control connection") &&
     authHelp.getAttribute("aria-label") === "authToken help" &&
-    fieldTitleOf("server-form", "authToken") === "authToken",
-  `${tipEl.textContent} / ${authHelp.getAttribute("aria-label")}`,
+    fieldTitleOf("server-form", "authToken") === "authToken" &&
+    authBadge.textContent === "Optional",
+  `${tipEl.textContent} / ${authHelp.getAttribute("aria-label")} / ${authBadge.textContent}`,
 );
 await T.setLanguagePref("zh-CN");
-check("S13 切回中文：tooltip 与 aria 同步回中文", tipEl.textContent === "可留空" && authHelp.getAttribute("aria-label") === "authToken 说明");
+check(
+  "S13 切回中文：tooltip、aria 与「可选」标记同步回中文",
+  tipEl.textContent === T.t("srvForm.authTokenHelp") &&
+    tipEl.textContent.includes("控制连接") &&
+    authHelp.getAttribute("aria-label") === "authToken 说明" &&
+    authBadge.textContent === "可选",
+);
 authHelp.dispatchEvent({ type: "blur" });
-check("S13 失焦：tooltip 隐藏", tipEl.hidden === true);
+await sleep(200);
+check("S13 失焦：退出动画结束后 tooltip 隐藏", tipEl.hidden === true);
+
+// 定位与翻转：视口/锚点几何在测试桩中显式注入（真实布局由浏览器计算）
+stubWindow.innerWidth = 800;
+stubWindow.innerHeight = 320;
+const savedHelpRect = authHelp.getBoundingClientRect;
+authHelp.getBoundingClientRect = () => ({ left: 292, right: 308, top: 292, bottom: 308, width: 16, height: 16 });
+tipEl.offsetWidth = 120;
+tipEl.offsetHeight = 40;
+authHelp.dispatchEvent({ type: "focus" });
+await sleep(460);
+check(
+  "S13 定位：底部放不下时翻到锚点上方（is-above / transform-origin 随方向切换）",
+  tipEl.hidden === false &&
+    tipEl.classList.contains("is-above") &&
+    tipEl.style.top === "246px" &&
+    tipEl.style.left === "240px",
+  `top=${tipEl.style.top} left=${tipEl.style.left} is-above=${tipEl.classList.contains("is-above")}`,
+);
+const leftBeforeLang = tipEl.style.left;
+tipEl.offsetWidth = 400; // 英文详文案更宽：模拟尺寸变化
+await T.setLanguagePref("en");
+check(
+  "S13 切语言：详文案尺寸变化后重算 positionFieldTip（夹紧视口不越界）",
+  tipEl.hidden === false &&
+    tipEl.style.left !== leftBeforeLang &&
+    tipEl.style.left === "100px" &&
+    Number.parseFloat(tipEl.style.left) >= 8,
+  `left=${leftBeforeLang} → ${tipEl.style.left}`,
+);
+await T.setLanguagePref("zh-CN");
+authHelp.dispatchEvent({ type: "blur" });
+await sleep(200);
+authHelp.getBoundingClientRect = savedHelpRect; // 还原桩几何，避免影响后续检查
+tipEl.offsetWidth = 0;
+tipEl.offsetHeight = 0;
+delete stubWindow.innerWidth;
+delete stubWindow.innerHeight;
+
+// 新增小问号详细文案：根域名 / 访问协议 / 本地 IP / HTTP 开关的 tooltip 呈现词典完整说明
+const baseHelp = helpBtnOf("server-form", "baseDomain");
+baseHelp.dispatchEvent({ type: "focus" });
+await sleep(460);
+check(
+  "S13 根域名小问号：*.example.com DNS / 不带 * / subDomainHost / blog.example.com",
+  tipEl.hidden === false &&
+    tipEl.textContent === T.t("srvForm.baseDomainHelp") &&
+    ["*.example.com", "不带", "subDomainHost", "vhostHTTPPort", "blog.example.com"].every((s) => tipEl.textContent.includes(s)),
+  tipEl.textContent,
+);
+baseHelp.dispatchEvent({ type: "blur" });
+await sleep(200);
+
+const schemeHelp = helpBtnOf("server-form", "scheme");
+schemeHelp.dispatchEvent({ type: "focus" });
+await sleep(460);
+const schemeHelpZh = tipEl.textContent;
+check(
+  "S13 访问协议小问号：只描述对外 URL、不为 Frps 开 TLS；直连 http + 反代网关公开入口",
+  tipEl.hidden === false &&
+    schemeHelpZh === T.t("srvForm.schemeHelp") &&
+    ["不会为 Frps 开启 TLS", "vhostHTTPSPort", "http", "反向代理", "网关", "公开入口"].every((s) => schemeHelpZh.includes(s)),
+  schemeHelpZh,
+);
+await T.setLanguagePref("en");
+check(
+  "S13 切英文：访问协议详细说明同步刷新（新文案非回退原文）",
+  tipEl.hidden === false &&
+    tipEl.textContent !== schemeHelpZh &&
+    tipEl.textContent === T.t("srvForm.schemeHelp") &&
+    tipEl.textContent.includes("reverse proxy"),
+  tipEl.textContent,
+);
+schemeHelp.dispatchEvent({ type: "blur" });
+await sleep(200);
+await T.setLanguagePref("zh-CN");
+
+const localHelp = helpBtnOf("service-form", "localHost");
+localHelp.dispatchEvent({ type: "focus" });
+await sleep(460);
+check(
+  "S13 本地 IP 小问号：完整说明（本机 IP / 同内网设备 / frpc 转发）",
+  tipEl.hidden === false &&
+    tipEl.textContent === T.t("form.localIPHelp") &&
+    ["本机 IP", "内网", "frpc"].every((s) => tipEl.textContent.includes(s)),
+  tipEl.textContent,
+);
+localHelp.dispatchEvent({ type: "blur" });
+await sleep(200);
+
+toggleHelp.dispatchEvent({ type: "pointerenter", bubbles: true });
+await sleep(460);
+check(
+  "S13 HTTP 开关小问号：frps.toml 可执行配置（vhostHTTPPort/subDomainHost/重启）+ 客户端入口依赖",
+  tipEl.hidden === false &&
+    tipEl.textContent === T.t("srvForm.httpToggleHelp") &&
+    ["frps.toml", "vhostHTTPPort", "subDomainHost", "*.example.com", "重启", "根域名", "访问协议"].every((s) =>
+      tipEl.textContent.includes(s),
+    ),
+  tipEl.textContent,
+);
+toggleHelp.dispatchEvent({ type: "pointerleave", bubbles: true });
+await sleep(200);
 
 // 点击帮助图标：不关闭模态、不触发表单保存
 const submitCalls = () =>
@@ -1683,11 +1873,17 @@ check(
   document.getElementById("server-modal").hidden === false && submitCalls() === submitsBefore,
 );
 
-// 关闭模态：tooltip 同步收起
+// 关闭模态：tooltip 立即退出动画并最终隐藏，不残留到下次打开
 authHelp.dispatchEvent({ type: "focus" });
 await sleep(460);
 T.closeServerModal();
-check("S13 关闭模态：tooltip 同步收起", tipEl.hidden === true);
+check(
+  "S13 关闭模态：tooltip 立即退出 is-open",
+  tipEl.hidden === false && !tipEl.classList.contains("is-open"),
+  `hidden=${tipEl.hidden} is-open=${tipEl.classList.contains("is-open")}`,
+);
+await sleep(200);
+check("S13 关闭模态：退出动画结束后隐藏", tipEl.hidden === true);
 await sleep(450); // 等模态退场定时器结束，不影响后续
 await T.setLanguagePref("zh-CN");
 
