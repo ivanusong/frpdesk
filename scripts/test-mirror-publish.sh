@@ -129,7 +129,11 @@ case "$op" in
     done
     if [ -n "${FAKE_FAIL_LSJSON:-}" ]; then echo "2026/01/01 ERROR: access denied (injected)" >&2; exit 1; fi
     key="$(key_of "$path")"; f="$STATE/objects/$key"
-    if [ ! -f "$f" ]; then echo "2026/01/01 NOTICE: Failed to lsjson: directory not found" >&2; exit 3; fi
+    if [ ! -f "$f" ]; then
+      # 对齐真实 rclone（0.2.11 验收实测）：不存在对象返回 rc=0 且 Size=-1
+      printf '{\n\t"Path": "%s",\n\t"Name": "%s",\n\t"Size": -1\n}\n' "$key" "$(basename "$key")"
+      exit 0
+    fi
     size="$(wc -c < "$f" | tr -d ' ')"
     cc=""
     [ -f "$STATE/meta/$key" ] && cc="$(cat "$STATE/meta/$key")"
@@ -192,9 +196,10 @@ sync_cmd() {
 
 echo "===== 成功路径 ====="
 
-# --- S1 全量成功：最后一步才切 stable，且带 no-cache ---
+# --- S1 全量成功（远端为空，lsjson 以 rc=0+Size=-1 表达不存在）：最后一步才切 stable ---
 env_on; rm -rf "$FAKE_STATE"
-run_case "S1 首次全量同步成功" 0 sync_cmd
+run_case "S1 首次全量同步成功（远端对象均以 rc=0+Size=-1 表达不存在）" 0 sync_cmd
+assert_nogrep "S1 未把 Size=-1 误判为已存在对象" "禁止不同内容覆盖" "$LOGF"
 assert_grep "S1 日志：镜像同步完成（上传5）" "镜像同步完成：version=0.2.10 上传=5 跳过(内容一致)=0" "$LOGF"
 for f in frpdesk-0.2.10-darwin-arm64.zip frpdesk-0.2.10-darwin-amd64.zip frpdesk-0.2.10-windows-amd64.exe frpdesk-0.2.10-licenses.zip manifest.json; do
   assert_file "S1 对象已入库：releases/0.2.10/$f" "$WORKDIR/stub-state/objects/$OBJ_BASE/releases/0.2.10/$f"

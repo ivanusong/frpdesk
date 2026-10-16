@@ -234,7 +234,9 @@ ACTIONS_LOG="$WORK/actions.log"
 
 # ---------- 远端查询原语 ----------
 # remote_stat：stdout 输出对象大小；对象不存在输出空；其余任何失败硬失败。
-# 仅当错误信息明确是 not found 才视为不存在，避免把认证/网络错误误判为"可覆盖"。
+# 真实 rclone lsjson --stat 对不存在对象返回 rc=0 且 Size=-1（0.2.11 验收实测），
+# 故 Size<0 规范为不存在；部分后端/旧版本返回 rc≠0 且报 not found，同样视为不存在。
+# 仅这两种情况视为不存在，避免把认证/网络错误误判为"可覆盖"。
 # 两个原语都运行在 $(...) 子 shell 内且自行处理错误：先关闭 ERR trap，
 # 防止 errtrace 继承的 on_err 把日志写进捕获结果。
 remote_stat() {
@@ -246,7 +248,7 @@ remote_stat() {
   set -e
   trap on_err ERR
   if [ "$rc" -eq 0 ]; then
-    printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(String(JSON.parse(s).Size))})'
+    printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const n=Number(JSON.parse(s).Size);process.stdout.write(n>=0?String(n):"")})'
   elif grep -qi "not found" "$errf"; then
     : # 对象不存在：输出空
   else
