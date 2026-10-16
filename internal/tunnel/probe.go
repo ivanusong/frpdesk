@@ -21,6 +21,7 @@ import (
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 )
 
 // probeTimeout 单次探测的整体时限（含并发排队等待）：超时按「连接超时」分类。
@@ -165,12 +166,12 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 	case remaining := <-time.After(time.Until(deadline)):
 		_ = remaining
 		slog.Info("[探测] 排队超时", "server", server.Name, "id", server.ID)
-		res.Message = "探测排队超时，请稍后重试"
+		res.Message = i18n.T("probe.queueTimeout")
 		return res
 	}
 
 	if strings.TrimSpace(server.ServerAddr) == "" {
-		res.Message = "服务器地址为空"
+		res.Message = i18n.T("probe.addrEmpty")
 		return res
 	}
 
@@ -186,7 +187,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 
 	configSource := source.NewConfigSource()
 	if err := configSource.ReplaceAll(nil, nil); err != nil { // 无代理：不注册任何隧道
-		res.Message = "初始化探测客户端失败"
+		res.Message = i18n.T("probe.initFail")
 		slog.Warn("[探测] 配置源初始化失败", "server", server.Name, "id", server.ID, "err", err)
 		return res
 	}
@@ -196,7 +197,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 		ConnectorCreator:       tracker.creator(), // 包装器：超时/取消后 shutdown 强制中断在途登录读
 	})
 	if err != nil {
-		res.Message = "创建探测客户端失败"
+		res.Message = i18n.T("probe.createFail")
 		slog.Warn("[探测] 创建 frpc 失败", "server", server.Name, "id", server.ID, "err", err)
 		return res
 	}
@@ -225,7 +226,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 			<-done
 			slog.Info("[探测] 超时", "server", server.Name, "id", server.ID,
 				"addr", server.ServerAddr, "port", server.ServerPort, "timeout", probeTimeout)
-			res.Message = "连接超时（8 秒内未完成登录，请检查地址与端口）"
+			res.Message = i18n.T("probe.timeout")
 			return res
 		case <-ticker.C:
 			if svc.IsConnected() {
@@ -235,7 +236,7 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 				<-done             // 等待 Run 完整收尾（cancel+shutdown 保证退出）
 				res.Success = true
 				res.LatencyMs = latency.Milliseconds()
-				res.Message = "FRPS 控制连接与鉴权通过（不代表 HTTP 域名或业务端口可用）"
+				res.Message = i18n.T("probe.ok")
 				slog.Info("[探测] 成功", "server", server.Name, "id", server.ID,
 					"latencyMs", res.LatencyMs)
 				return res
@@ -244,22 +245,22 @@ func TestServerConnection(server configstore.ServerConfig) ServerConnectionTestR
 	}
 }
 
-// classifyProbeFailure 把 frp 登录失败的原始错误归类为用户可读消息。
+// classifyProbeFailure 把 frp 登录失败的原始错误归类为用户可读消息（当前语言）。
 func classifyProbeFailure(err error) string {
 	if err == nil {
-		return "连接已关闭"
+		return i18n.T("probe.connClosed")
 	}
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "connection refused"):
-		return "无法连接 frps：地址或端口不可达（连接被拒绝）"
+		return i18n.T("probe.refused")
 	case strings.Contains(msg, "i/o timeout"),
 		strings.Contains(msg, "context deadline exceeded"),
 		strings.Contains(msg, "context canceled"):
-		return "无法连接 frps：连接超时"
+		return i18n.T("probe.ioTimeout")
 	case strings.Contains(msg, "token"), strings.Contains(msg, "auth"):
-		return "frps 拒绝登录：鉴权失败（请检查 authToken）"
+		return i18n.T("probe.authFail")
 	default:
-		return "无法连接 frps：登录被拒绝或连接中断"
+		return i18n.T("probe.loginFail")
 	}
 }

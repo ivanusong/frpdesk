@@ -7,6 +7,8 @@ import (
 	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"frpdesk/internal/i18n"
 )
 
 //go:embed all:frontend/dist
@@ -26,7 +28,7 @@ func main() {
 
 	app := application.New(application.Options{
 		Name:        "frpdesk",
-		Description: "frp 穿透客户端",
+		Description: i18n.T(i18n.KeyAppDescription),
 		Services: []application.Service{
 			application.NewService(appService),
 		},

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"frpdesk/internal/i18n"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -64,7 +66,7 @@ func TestMigrateLegacyGlobalToDefaultServer(t *testing.T) {
 		t.Fatalf("应迁移出 1 台服务器: %+v", cfg.Servers)
 	}
 	sv := cfg.Servers[0]
-	if sv.ID != legacyDefaultServerID || sv.Name != legacyDefaultServerName {
+	if sv.ID != legacyDefaultServerID || sv.Name != i18n.T("legacy.defaultServerName") {
 		t.Fatalf("默认服务器 ID/名应为稳定值: %+v", sv)
 	}
 	if !sv.HTTPEnabled || sv.ServerAddr != "old.example.com" || sv.ServerPort != 9999 ||

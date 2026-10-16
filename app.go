@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/updater"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 	"frpdesk/internal/stats"
 	"frpdesk/internal/tunnel"
 )
@@ -34,6 +36,10 @@ func NewAppService() *AppService {
 		slog.Error("初始化配置存储失败", "err", err)
 		panic(err)
 	}
+	// 按持久化偏好解析界面语言（system 时探测系统语言）：必须在托盘/窗口
+	// 装配前完成，保证启动时的托盘菜单与状态就是用户语言。
+	i18n.SetPreference(store.Language())
+	slog.Info("[i18n] 界面语言已解析", "lang", i18n.Current(), "pref", store.Language())
 	mgr := tunnel.NewManager()
 
 	// 请求统计：collector 与 App 同生命周期（不随隧道启停清零，重启归零）；
@@ -200,6 +206,27 @@ func (a *AppService) FrontendLog(level, message string) error {
 	return nil
 }
 
+// SetLanguage 持久化语言偏好（system/zh-CN/en）并立即应用：更新进程 i18n、
+// 刷新托盘菜单/状态文案，并记录日志。不触碰隧道/服务器状态（不重启隧道）。
+func (a *AppService) SetLanguage(pref string) error {
+	if !i18n.IsValidPref(pref) {
+		return errors.New(i18n.T("err.invalidLanguage"))
+	}
+	if err := a.store.SetLanguage(pref); err != nil {
+		return err
+	}
+	lang := i18n.SetPreference(pref)
+	slog.Info("[i18n] 语言已切换", "pref", pref, "lang", lang)
+	if a.tray != nil {
+		a.tray.applyLanguage()
+	}
+	// 状态说明类消息按新语言重建并重推快照：前端状态栏/托盘原因行即时跟随
+	// （错误详情保留发生时的原文；不触碰隧道，不重连）。
+	a.tunnel.RefreshLocalizedMessages()
+	a.emitSnapshot()
+	return nil
+}
+
 // Snapshot 返回配置 + 聚合状态 + 逐服务器状态快照（前端绑定拉取）。
 func (a *AppService) Snapshot() configstore.Snapshot {
 	return a.buildSnapshot()
@@ -334,13 +361,13 @@ func (a *AppService) summarizeFailures() error {
 					break
 				}
 			}
-			failed = append(failed, fmt.Sprintf("%s：%s", name, st.Message))
+			failed = append(failed, i18n.T("msg.failureItem", name, st.Message))
 		}
 	}
 	if len(failed) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%d 台服务器启动失败（%s）", len(failed), strings.Join(failed, "；"))
+	return errors.New(i18n.T("msg.startFailed", len(failed), strings.Join(failed, i18n.T("msg.failureJoin"))))
 }
 
 // ---------- 隧道 CRUD ----------
@@ -457,12 +484,12 @@ func (a *AppService) PublicURL(id string) (string, error) {
 		if svc.ID == id {
 			server, ok := cfg.ServerByID(svc.ServerID)
 			if !ok {
-				return "", fmt.Errorf("隧道归属的服务器不存在")
+				return "", errors.New(i18n.T("err.tunnelServerMissing"))
 			}
 			return configstore.PublicURL(server, svc), nil
 		}
 	}
-	return "", fmt.Errorf("服务不存在")
+	return "", errors.New(i18n.T("err.serviceNotFound"))
 }
 
 // TestServerConnection 独立测试已保存服务器的 FRPS 控制连通性。
@@ -472,7 +499,7 @@ func (a *AppService) TestServerConnection(serverId string) (tunnel.ServerConnect
 	cfg := a.store.Config()
 	server, ok := cfg.ServerByID(serverId)
 	if !ok {
-		return tunnel.ServerConnectionTestResult{}, fmt.Errorf("服务器不存在")
+		return tunnel.ServerConnectionTestResult{}, errors.New(i18n.T("err.serverNotFound"))
 	}
 	res := tunnel.TestServerConnection(server)
 	slog.Info("[前端] 服务器连通性探测完成",

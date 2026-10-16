@@ -12,15 +12,18 @@
   </head>
   <body>
     <div class="app">
-      <!-- ===== 顶栏（拖拽区）：左侧标题/更新入口 + 右侧 检查更新/主题 ===== -->
+      <!-- ===== 顶栏（拖拽区）：左侧标题/更新入口 + 右侧 检查更新/语言/主题 ===== -->
       <header class="titlebar">
         <div class="titlebar-left">
-          <span id="app-version" class="app-version" title="当前版本"></span>
+          <span id="app-version" class="app-version" data-i18n-title="app.versionTip"></span>
           <button id="btn-update-apply" class="update-chip no-drag" type="button" hidden></button>
         </div>
         <div class="titlebar-actions">
-          <button id="btn-check-update" class="btn btn-icon btn-ghost no-drag" type="button" title="检查更新" aria-label="检查更新">
+          <button id="btn-check-update" class="btn btn-icon btn-ghost no-drag" type="button" data-i18n-title="update.check" data-i18n-aria="update.check">
             <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+          </button>
+          <button id="btn-lang" class="btn btn-icon btn-ghost no-drag" type="button" data-i18n-aria="lang.aria">
+            <svg class="icon" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
           </button>
           <button id="btn-theme" class="btn btn-icon btn-ghost no-drag" type="button" title="主题：跟随系统" aria-label="切换主题" data-theme-mode="system">
             <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
@@ -31,11 +34,11 @@
       <main class="panels">
         <!-- 共享工具行：左侧 Tab 导航 + 右侧当前面板的上下文操作（随 Tab 切换显隐） -->
         <div class="toolbar">
-          <nav class="tabbar" role="tablist" aria-label="功能面板">
-            <button class="tab is-active" role="tab" aria-selected="true" data-tab="tunnels" type="button">隧道</button>
-            <button class="tab" role="tab" aria-selected="false" data-tab="stats" type="button">统计</button>
-            <button class="tab" role="tab" aria-selected="false" data-tab="logs" type="button">日志</button>
-            <button class="tab" role="tab" aria-selected="false" data-tab="servers" type="button">配置</button>
+          <nav class="tabbar" role="tablist" data-i18n-aria="tab.aria">
+            <button class="tab is-active" role="tab" aria-selected="true" data-tab="tunnels" type="button" data-i18n="tab.tunnels">隧道</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="stats" type="button" data-i18n="tab.stats">统计</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="logs" type="button" data-i18n="tab.logs">日志</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="servers" type="button" data-i18n="tab.servers">配置</button>
             <span id="tab-slider" class="tab-slider" aria-hidden="true"></span>
           </nav>
           <div class="toolbar-actions" id="actions-tunnels" data-panel="tunnels">
@@ -43,54 +46,54 @@
             <div class="btn-pair">
               <button class="btn" id="btn-add-http" type="button">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                <span>新增 HTTP 服务</span>
+                <span data-i18n="action.addHttp">新增 HTTP 服务</span>
               </button>
               <button class="btn" id="btn-add-port" type="button">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                <span>新增 TCP / UDP 服务</span>
+                <span data-i18n="action.addPort">新增 TCP / UDP 服务</span>
               </button>
             </div>
           </div>
           <div class="toolbar-actions" id="actions-logs" data-panel="logs" hidden>
             <label class="check-inline">
               <input type="checkbox" id="log-autoscroll" checked />
-              <span>自动滚动</span>
+              <span data-i18n="log.autoscroll">自动滚动</span>
             </label>
-            <button class="btn btn-ghost" id="btn-clear-logs" type="button">清空显示</button>
+            <button class="btn btn-ghost" id="btn-clear-logs" type="button" data-i18n="log.clear">清空显示</button>
           </div>
           <div class="toolbar-actions" id="actions-servers" data-panel="servers" hidden>
             <button class="btn" id="btn-add-server" type="button">
               <svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-              <span>新增 Frps</span>
+              <span data-i18n="action.addServer">新增 Frps</span>
             </button>
           </div>
         </div>
 
         <!-- Tab 1：服务列表 -->
-        <section class="panel is-active" id="tab-tunnels" role="tabpanel" aria-label="隧道">
+        <section class="panel is-active" id="tab-tunnels" role="tabpanel" data-i18n-aria="tab.tunnels">
           <div class="service-list" id="service-list">
-            <p class="empty" id="service-empty">还没有穿透服务，点右上角「新增」。</p>
+            <p class="empty" id="service-empty" data-i18n="empty.services">还没有穿透服务，点右上角「新增」。</p>
           </div>
         </section>
 
         <!-- Tab 2：日志 -->
-        <section class="panel panel-logs" id="tab-logs" role="tabpanel" aria-label="日志" hidden>
+        <section class="panel panel-logs" id="tab-logs" role="tabpanel" data-i18n-aria="tab.logs" hidden>
           <div class="log-view" id="log-view" tabindex="0"></div>
         </section>
 
         <!-- Tab：配置（Frps 服务器列表；独立启停/编辑/删除，激活时拉取最新快照） -->
-        <section class="panel" id="tab-servers" role="tabpanel" aria-label="配置" hidden>
+        <section class="panel" id="tab-servers" role="tabpanel" data-i18n-aria="tab.servers" hidden>
           <div class="server-list" id="server-list">
-            <p class="empty" id="server-empty">还没有 Frps 配置，点右上角「新增 Frps」。</p>
+            <p class="empty" id="server-empty" data-i18n="empty.servers">还没有 Frps 配置，点右上角「新增 Frps」。</p>
           </div>
         </section>
 
         <!-- Tab 3：统计（HTTP 服务请求统计；激活时拉取 + 2s 轮询，切走即停） -->
-        <section class="panel panel-stats" id="tab-stats" role="tabpanel" aria-label="统计" hidden>
+        <section class="panel panel-stats" id="tab-stats" role="tabpanel" data-i18n-aria="tab.stats" hidden>
           <!-- 空态 / 加载失败态：total.requests === 0 或拉取失败时替代整版内容 -->
           <div class="stats-empty" id="stats-empty" hidden>
-            <p class="stats-empty-title" id="stats-empty-title">暂无统计数据</p>
-            <p class="stats-empty-hint" id="stats-empty-hint">启动隧道并产生访问后，这里会展示 HTTP 服务的请求统计。</p>
+            <p class="stats-empty-title" id="stats-empty-title" data-i18n="stats.emptyTitle">暂无统计数据</p>
+            <p class="stats-empty-hint" id="stats-empty-hint" data-i18n="stats.emptyHint">隧道产生访问后，这里会展示 HTTP 服务的请求统计。</p>
           </div>
           <!-- 已有数据时的刷新失败提示（低调一行，不打断浏览） -->
           <p class="stats-error" id="stats-error" hidden></p>
@@ -100,23 +103,23 @@
             <div class="rank-grid" id="rank-grid">
               <section class="stat-section" id="stat-services-sec">
                 <div class="stat-sec-head">
-                  <h3>服务访问排行</h3>
-                  <span class="stat-sec-note">仅统计 HTTP 服务</span>
+                  <h3 data-i18n="stats.rankServices">服务访问排行</h3>
+                  <span class="stat-sec-note" data-i18n="stats.noteHttpOnly">仅统计 HTTP 服务</span>
                 </div>
                 <div class="rank-list" id="stat-services"></div>
               </section>
               <section class="stat-section" id="stat-traffic-sec">
                 <div class="stat-sec-head">
-                  <h3>服务流量排行</h3>
-                  <span class="stat-sec-note">仅统计 HTTP 服务</span>
+                  <h3 data-i18n="stats.rankTraffic">服务流量排行</h3>
+                  <span class="stat-sec-note" data-i18n="stats.noteHttpOnly">仅统计 HTTP 服务</span>
                 </div>
                 <div class="rank-list" id="stat-traffic"></div>
               </section>
             </div>
             <section class="stat-section" id="stat-paths-sec">
               <div class="stat-sec-head">
-                <h3>热门路径</h3>
-                <span class="stat-sec-note">全部服务合并 Top 10</span>
+                <h3 data-i18n="stats.hotPaths">热门路径</h3>
+                <span class="stat-sec-note" data-i18n="stats.notePathsTop10">全部服务合并 Top 10</span>
               </div>
               <div class="rank-list" id="stat-paths"></div>
             </section>
@@ -124,7 +127,7 @@
             <div class="timeline-row" id="stat-timeline-row">
               <section class="stat-section" id="stat-timeline-sec">
                 <div class="stat-sec-head">
-                  <h3>分时请求曲线</h3>
+                  <h3 data-i18n="stats.timeline">分时请求曲线</h3>
                   <span class="stat-sec-note" id="stat-timeline-note"></span>
                 </div>
                 <div id="stat-timeline-chart"></div>
@@ -132,14 +135,14 @@
               <!-- 设备类别分布：独立区块，无 devices 数据时不渲染（左框自动独占整行） -->
               <section class="stat-section" id="stat-devices-sec" hidden>
                 <div class="stat-sec-head">
-                  <h3>访问设备分布</h3>
+                  <h3 data-i18n="stats.devices">访问设备分布</h3>
                 </div>
                 <div class="device-body" id="stat-devices"></div>
               </section>
             </div>
             <section class="stat-section" id="stat-recent-sec">
               <div class="stat-sec-head">
-                <h3>最近请求</h3>
+                <h3 data-i18n="stats.recent">最近请求</h3>
               </div>
               <div class="recent-wrap" id="stat-recent"></div>
             </section>
@@ -151,17 +154,17 @@
       <footer class="statusbar">
         <div class="status">
           <span class="dot" id="status-dot"></span>
-          <strong id="status-label">未知</strong>
-          <span class="status-count" id="service-count" title="已连接 / 配置了启用隧道的服务器">0/0</span>
+          <strong id="status-label" data-i18n="state.unknown">未知</strong>
+          <span class="status-count" id="service-count" data-i18n-title="status.countTip">0/0</span>
           <span class="status-failed" id="status-failed" hidden></span>
           <small class="status-message" id="status-message"></small>
           <small class="status-started" id="status-started"></small>
         </div>
         <div class="statusbar-actions">
           <!-- 退出程序：无边框 ghost，二次确认后走托盘同一退出路径 -->
-          <button id="btn-quit" class="btn btn-ghost" type="button" title="退出程序">
+          <button id="btn-quit" class="btn btn-ghost" type="button" data-i18n-title="action.quit">
             <svg class="icon" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
-            <span>退出程序</span>
+            <span data-i18n="action.quit">退出程序</span>
           </button>
         </div>
       </footer>
@@ -172,14 +175,14 @@
       <div class="modal-overlay" data-close-modal></div>
       <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div class="modal-head">
-          <h2 id="modal-title">新增服务</h2>
+          <h2 id="modal-title" data-i18n="modal.addService">新增服务</h2>
           <div class="icon-pick-wrap">
-            <button type="button" class="service-icon" id="btn-icon-pick" title="选择图标" aria-label="选择服务图标" aria-haspopup="listbox" aria-expanded="false"></button>
+            <button type="button" class="service-icon" id="btn-icon-pick" data-i18n-title="icon.pick" data-i18n-aria="icon.pickAria" aria-haspopup="listbox" aria-expanded="false"></button>
             <div class="icon-popover" id="icon-popover" hidden>
               <div class="icon-popover-actions">
-                <button type="button" class="btn btn-sm" id="btn-icon-random">🎲 随机</button>
+                <button type="button" class="btn btn-sm" id="btn-icon-random" data-i18n="icon.random">🎲 随机</button>
               </div>
-              <div class="icon-grid" id="icon-grid" role="listbox" aria-label="精选图标"></div>
+              <div class="icon-grid" id="icon-grid" role="listbox" data-i18n-aria="icon.gridAria"></div>
             </div>
           </div>
         </div>
@@ -188,7 +191,7 @@
           <input type="hidden" name="type" value="http" />
           <div class="form-row" data-fields="proto" hidden>
             <label>
-              <span>协议</span>
+              <span data-i18n="form.proto">协议</span>
               <div class="select-wrap select-inline">
                 <select name="proto" id="svc-proto-select">
                   <option value="tcp" selected>TCP</option>
@@ -198,42 +201,42 @@
             </label>
           </div>
           <label>
-            <span>服务名称</span>
-            <input name="name" type="text" autocomplete="off" placeholder="例如：本地博客" required />
+            <span data-i18n="form.svcName">服务名称</span>
+            <input name="name" type="text" autocomplete="off" data-i18n-placeholder="form.svcNamePh" placeholder="例如：本地博客" required />
           </label>
           <div class="form-row">
             <label>
-              <span>本地 IP</span>
+              <span data-i18n="form.localIP">本地 IP</span>
               <input name="localHost" type="text" value="127.0.0.1" autocomplete="off" />
             </label>
             <label>
-              <span>本地端口</span>
+              <span data-i18n="form.localPort">本地端口</span>
               <input name="localPort" type="number" min="1" max="65535" inputmode="numeric" placeholder="8080" required />
             </label>
           </div>
           <div data-fields="http">
             <label>
-              <span>子域名前缀（留空自动生成）</span>
-              <input name="subdomain" type="text" autocomplete="off" placeholder="例如：my-blog" />
+              <span data-i18n="form.subdomain">子域名前缀（留空自动生成）</span>
+              <input name="subdomain" type="text" autocomplete="off" data-i18n-placeholder="form.subdomainPh" placeholder="例如：my-blog" />
             </label>
           </div>
           <div data-fields="port" hidden>
             <label>
-              <span>远程端口（frps 侧监听端口，必填）</span>
-              <input name="remotePort" type="number" min="1" max="65535" inputmode="numeric" placeholder="例如：36000" />
+              <span data-i18n="form.remotePort">远程端口（frps 侧监听端口，必填）</span>
+              <input name="remotePort" type="number" min="1" max="65535" inputmode="numeric" data-i18n-placeholder="form.remotePortPh" placeholder="例如：36000" />
             </label>
           </div>
           <!-- 服务器归属：选择变化时提示新访问地址与短暂中断（保存前不触后端） -->
           <div class="move-hint" id="svc-move-hint" hidden></div>
           <div class="form-actions form-actions--server">
             <label class="server-pick">
-              <span>目标 Frps</span>
+              <span data-i18n="form.targetServer">目标 Frps</span>
               <div class="select-wrap select-inline">
                 <select name="serverId" id="svc-server-select"></select>
               </div>
             </label>
-            <button type="button" class="btn" data-close-modal>取消</button>
-            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="button" class="btn" data-close-modal data-i18n="generic.cancel">取消</button>
+            <button type="submit" class="btn btn-primary" data-i18n="generic.save">保存</button>
           </div>
         </form>
       </div>
@@ -243,40 +246,40 @@
     <div class="modal" id="server-modal" hidden>
       <div class="modal-overlay" data-close-server></div>
       <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="server-modal-title">
-        <h2 id="server-modal-title">新增 Frps 配置</h2>
+        <h2 id="server-modal-title" data-i18n="modal.addServer">新增 Frps 配置</h2>
         <form id="server-form" class="form">
           <label>
-            <span>配置名称</span>
-            <input name="name" type="text" autocomplete="off" placeholder="例如：主服务器" required />
+            <span data-i18n="srvForm.configName">配置名称</span>
+            <input name="name" type="text" autocomplete="off" data-i18n-placeholder="srvForm.configNamePh" placeholder="例如：主服务器" required />
           </label>
           <div class="form-row">
             <label>
-              <span>服务器地址</span>
+              <span data-i18n="srvForm.addr">服务器地址</span>
               <input name="serverAddr" type="text" autocomplete="off" placeholder="frp.example.com" required />
             </label>
             <label>
-              <span>端口</span>
+              <span data-i18n="srvForm.port">端口</span>
               <input name="serverPort" type="number" min="1" max="65535" inputmode="numeric" value="7000" required />
             </label>
           </div>
           <label>
-            <span>authToken（可留空）</span>
-            <input name="authToken" type="password" autocomplete="off" placeholder="留空表示无鉴权" />
+            <span data-i18n="srvForm.authToken">authToken（可留空）</span>
+            <input name="authToken" type="password" autocomplete="off" data-i18n-placeholder="srvForm.authTokenPh" placeholder="留空表示无鉴权" />
           </label>
           <section class="server-http-toggle">
             <label class="server-http-toggle-head" for="srv-http-switch">
-              <span class="server-http-toggle-title">支持 HTTP 域名</span>
+              <span class="server-http-toggle-title" data-i18n="srvForm.httpToggle">支持 HTTP 域名</span>
               <input type="checkbox" class="switch" id="srv-http-switch" name="httpEnabled" role="switch" aria-controls="srv-http-fields" aria-expanded="false" />
             </label>
-            <p class="server-http-toggle-hint">使用该 Frps 已配置的域名与端口作为 HTTP 服务入口</p>
+            <p class="server-http-toggle-hint" data-i18n="srvForm.httpToggleHint">使用该 Frps 已配置的域名与端口作为 HTTP 服务入口</p>
             <div id="srv-http-fields" data-fields="srv-http" class="server-http-fields" hidden>
               <label>
-                <span>根域名（必填，HTTP 服务入口）</span>
+                <span data-i18n="srvForm.baseDomain">根域名（必填，HTTP 服务入口）</span>
                 <input name="baseDomain" type="text" autocomplete="off" placeholder="example.com" />
               </label>
               <div class="form-row">
                 <label>
-                  <span>访问协议</span>
+                  <span data-i18n="srvForm.scheme">访问协议</span>
                   <div class="select-wrap">
                     <select name="scheme">
                       <option value="https" selected>https</option>
@@ -285,15 +288,15 @@
                   </div>
                 </label>
                 <label>
-                  <span>访问端口（留空使用默认）</span>
-                  <input name="publicPort" type="number" min="1" max="65535" inputmode="numeric" placeholder="例如：8443" />
+                  <span data-i18n="srvForm.publicPort">访问端口（留空使用默认）</span>
+                  <input name="publicPort" type="number" min="1" max="65535" inputmode="numeric" data-i18n-placeholder="srvForm.publicPortPh" placeholder="例如：8443" />
                 </label>
               </div>
             </div>
           </section>
           <div class="form-actions">
-            <button type="button" class="btn" data-close-server>取消</button>
-            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="button" class="btn" data-close-server data-i18n="generic.cancel">取消</button>
+            <button type="submit" class="btn btn-primary" data-i18n="generic.save">保存</button>
           </div>
         </form>
       </div>
@@ -302,7 +305,7 @@
     <!-- ===== 访问二维码小弹窗（卡片二维码按钮打开）===== -->
     <div class="modal qr-modal" id="qr-modal" hidden>
       <div class="modal-overlay" data-close-qr></div>
-      <div class="modal-panel qr-panel" role="dialog" aria-modal="true" aria-label="访问二维码">
+      <div class="modal-panel qr-panel" role="dialog" aria-modal="true" data-i18n-aria="qr.aria">
         <div class="qr-box" id="qr-box"></div>
         <p class="qr-url" id="qr-url"></p>
       </div>

@@ -49,6 +49,9 @@ jobs:
       - name: 前端多服务端行为验证（零依赖 Node 脚本）
         run: node scripts/verify-multiserver-ui.mjs
 
+      - name: 双语词典校验（零依赖 Node 脚本）
+        run: node scripts/verify-i18n.mjs
+
       - name: 三目标构建（复用 build.sh）
         run: bash build.sh
 

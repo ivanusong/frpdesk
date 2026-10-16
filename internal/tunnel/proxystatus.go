@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/fatedier/frp/client"
+
+	"frpdesk/internal/i18n"
 )
 
 // ProxyStatus 单个代理的运行状态（简单字段，前端直接消费）。
@@ -40,23 +42,24 @@ func mapProxyState(frpPhase string) string {
 	}
 }
 
-// friendlyProxyErr 把 frp 的常见注册失败精准翻译成中文；保留原始错误供排查。
+// friendlyProxyErr 把 frp 的常见注册失败精准翻译成用户可读原因（当前语言）；
+// 保留原始错误（RawErr）供排查。
 // 注意：permission denied 不是端口占用，不得误归为「已被占用」。
 func friendlyProxyErr(raw string) string {
 	low := strings.ToLower(raw)
 	switch {
 	case strings.Contains(low, "port already used"):
-		return "远程端口已被其他服务占用"
+		return i18n.T("proxy.portUsed")
 	case strings.Contains(low, "address already in use"):
-		return "端口已被占用"
+		return i18n.T("proxy.addrInUse")
 	case strings.Contains(low, "port unavailable"):
-		return "远程端口不可用"
+		return i18n.T("proxy.portUnavailable")
 	case strings.Contains(low, "port not allowed"):
-		return "远程端口不在 frps 允许范围内"
+		return i18n.T("proxy.portNotAllowed")
 	case strings.Contains(low, "already exists"):
-		return "代理名称或子域名已被其他客户端使用"
+		return i18n.T("proxy.exists")
 	case strings.Contains(low, "conflict"):
-		return "与 frps 上已有代理配置冲突"
+		return i18n.T("proxy.conflict")
 	default:
 		return ""
 	}

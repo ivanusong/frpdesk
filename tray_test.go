@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 	"frpdesk/internal/tunnel"
 )
 
@@ -145,6 +146,24 @@ func TestConnectedTunnelCount(t *testing.T) {
 	// 空输入：0
 	if got := connectedTunnelCount(configstore.Config{}, nil, nil); got != 0 {
 		t.Fatalf("空输入应为 0，得到 %d", got)
+	}
+}
+
+// TestTrayViewForLocalized 托盘状态文案随语言切换：英文环境返回英文，
+// 且只改文案不改业务语义（计数/失败标记不变）。
+func TestTrayViewForLocalized(t *testing.T) {
+	t.Cleanup(func() { i18n.Set(i18n.ZH) })
+	i18n.Set(i18n.EN)
+	running := trayViewFor(configstore.TunnelStatus{State: configstore.StateRunning}, 2)
+	if running.StateText != "Connected 2" {
+		t.Fatalf("en running = %q", running.StateText)
+	}
+	failed := trayViewFor(configstore.TunnelStatus{State: configstore.StateFailed, Message: "boom", FailedCount: 1, TotalCount: 2}, 0)
+	if failed.StateText != "Failed 1/2" || !failed.Failed || !failed.ShowReason {
+		t.Fatalf("en failed = %+v", failed)
+	}
+	if got := trayViewFor(configstore.TunnelStatus{State: configstore.StateStopped}, 0).StateText; got != "Stopped" {
+		t.Fatalf("en stopped = %q", got)
 	}
 }
 

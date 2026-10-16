@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 	"frpdesk/internal/stats"
 	"frpdesk/internal/tunnel"
 )
@@ -88,6 +89,33 @@ func TestSummarizeFailures(t *testing.T) {
 		t.Fatalf("无失败应返回 nil: %v", err)
 	}
 
+}
+
+// TestSetLanguagePersistsAndApplies 语言绑定：合法偏好落盘并即时应用进程语言；
+// 非法偏好拒绝且不影响当前语言/配置；不触碰隧道状态。
+func TestSetLanguagePersistsAndApplies(t *testing.T) {
+	t.Cleanup(func() { i18n.Set(i18n.ZH) })
+	svc := newTestAppService(t)
+
+	if err := svc.SetLanguage(i18n.PrefEN); err != nil {
+		t.Fatalf("SetLanguage(en): %v", err)
+	}
+	if i18n.Current() != i18n.EN {
+		t.Fatalf("进程语言应为 en，得到 %v", i18n.Current())
+	}
+	if got := svc.store.Language(); got != i18n.PrefEN {
+		t.Fatalf("偏好应落盘为 en，得到 %q", got)
+	}
+	if len(svc.Snapshot().Config.Services) != 0 {
+		t.Fatal("切语言不应改动配置")
+	}
+
+	if err := svc.SetLanguage("fr"); err == nil {
+		t.Fatal("非法偏好应返回错误")
+	}
+	if i18n.Current() != i18n.EN || svc.store.Language() != i18n.PrefEN {
+		t.Fatalf("非法偏好不得改变状态: lang=%v pref=%q", i18n.Current(), svc.store.Language())
+	}
 }
 
 // TestDisableLastServiceAutoStops 禁用最后一个 enabled 隧道自动停止：
