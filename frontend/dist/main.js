@@ -354,6 +354,7 @@ function applyLanguage() {
   renderUpdate();
   renderCheckButton();
   refreshOpenModalI18n();
+  refreshFieldTipI18n(); // 已展开的表单帮助 tooltip 跟随语言重绘
 }
 
 // initLanguage：首帧应用本地缓存偏好（只读；resolved 待快照/绑定返回后以后端为准）。
@@ -447,6 +448,63 @@ function dismissToast(el) {
   el.classList.remove("is-in"); // 原路反向 160ms
   el.addEventListener("transitionend", () => el.remove(), { once: true });
   setTimeout(() => el.remove(), 200); // transitionend 兜底
+}
+
+// ---------- 表单小问号帮助 tooltip（hover/focus 延迟 400ms；单例元素，随语言重绘）----------
+
+const FIELD_TIP_DELAY = 400;
+const fieldTipState = { anchor: null, timer: 0 };
+
+// showFieldTip：填充帮助文案并显示；位置按锚点按钮计算（视口内夹紧）
+function showFieldTip(anchor) {
+  const tip = $("field-tip");
+  if (!tip || !anchor?.dataset?.help) return;
+  fieldTipState.timer = 0;
+  fieldTipState.anchor = anchor;
+  tip.textContent = t(anchor.dataset.help);
+  tip.hidden = false;
+  positionFieldTip(tip, anchor);
+}
+
+// scheduleFieldTip：延迟展示（hover/focus 共用），先收起当前 tooltip 并清旧定时器
+function scheduleFieldTip(anchor) {
+  hideFieldTip();
+  fieldTipState.anchor = anchor;
+  fieldTipState.timer = setTimeout(() => showFieldTip(anchor), FIELD_TIP_DELAY);
+}
+
+// hideFieldTip：立即隐藏（含未到延迟的待展示）
+function hideFieldTip() {
+  if (fieldTipState.timer) {
+    clearTimeout(fieldTipState.timer);
+    fieldTipState.timer = 0;
+  }
+  fieldTipState.anchor = null;
+  const tip = $("field-tip");
+  if (tip) tip.hidden = true;
+}
+
+// positionFieldTip：优先锚点下方，底部放不下时翻到上方；左右在视口内夹紧
+function positionFieldTip(tip, anchor) {
+  const vw = window.innerWidth || 0;
+  const vh = window.innerHeight || 0;
+  if (!vw || !vh) return; // 无布局环境（测试桩）：仅内容与可见性有意义
+  const rect = anchor.getBoundingClientRect();
+  const gap = 6;
+  const margin = 8;
+  const w = tip.offsetWidth;
+  const h = tip.offsetHeight;
+  const left = Math.max(margin, Math.min(rect.left + rect.width / 2 - w / 2, vw - w - margin));
+  const top = rect.bottom + gap + h > vh - margin ? Math.max(margin, rect.top - gap - h) : rect.bottom + gap;
+  tip.style.left = `${Math.round(left)}px`;
+  tip.style.top = `${Math.round(top)}px`;
+}
+
+// refreshFieldTipI18n：语言切换时重绘已展开的说明（按钮 aria 由 applyStaticI18n 刷新）
+function refreshFieldTipI18n() {
+  const tip = $("field-tip");
+  if (!tip || tip.hidden || !fieldTipState.anchor) return;
+  tip.textContent = t(fieldTipState.anchor.dataset.help);
 }
 
 // ---------- 主题（三态：system / light / dark，localStorage 记忆）----------
@@ -1753,6 +1811,7 @@ function closeServiceModal() {
   const modal = $("service-modal");
   if (modal.hidden) return;
   closeIconPopover(true); // 模态关闭时 popover 同步收起，避免残留到下次打开
+  hideFieldTip(); // 帮助 tooltip 同步收起
   modal.classList.remove("is-open");
   const panel = modal.querySelector(".modal-panel");
   let hidden = false;
@@ -1813,6 +1872,7 @@ function openServerModal(srv) {
 function closeServerModal() {
   const modal = $("server-modal");
   if (modal.hidden) return;
+  hideFieldTip(); // 帮助 tooltip 同步收起
   modal.classList.remove("is-open");
   const panel = modal.querySelector(".modal-panel");
   let hidden = false;
@@ -2367,6 +2427,20 @@ function bindEvents() {
     e.preventDefault();
     window.wails.Browser.OpenURL(link.dataset.url);
   });
+
+  // 表单小问号：hover/focus 延迟展示说明；点击仅作可达入口，不触发表单/模态行为
+  document.querySelectorAll(".field-help").forEach((btn) => {
+    btn.addEventListener("pointerenter", () => scheduleFieldTip(btn));
+    btn.addEventListener("pointerleave", hideFieldTip);
+    btn.addEventListener("focus", () => scheduleFieldTip(btn));
+    btn.addEventListener("blur", hideFieldTip);
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+  // 滚动/缩放时 tooltip 与锚点会错位，直接收起
+  document.addEventListener("scroll", hideFieldTip, true);
 
   // 后端推送：状态 / 增量日志 / 全量快照 / 更新状态（status 渲染唯一权威）
   window.wails.Events.On("app:status", (event) => {

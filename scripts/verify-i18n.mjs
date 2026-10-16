@@ -203,6 +203,58 @@ check(
     !readmeZh.includes("verify-i18n"),
 );
 
+// ---------- 10) 表单小问号帮助：短标题 + 帮助 key ----------
+// 长解释从小问号入口（data-help）延迟展示：主 label 必须是短标题（不含括号/长解释），
+// 每个帮助 key 都必须存在且与短标题不同；旧的 HTTP 开关常驻 hint 行与 key 必须移除。
+const helpKeys = [...html.matchAll(/data-help="([^"]+)"/g)].map((m) => m[1]);
+const helpAriaKeys = [...html.matchAll(/data-i18n-aria="([^"]*HelpAria)"/g)].map((m) => m[1]);
+const SHORT_TITLES = [
+  ["form.subdomain", "子域名前缀", "Subdomain prefix"],
+  ["form.remotePort", "远程端口", "Remote port"],
+  ["srvForm.authToken", "authToken", "authToken"],
+  ["srvForm.baseDomain", "根域名", "Base domain"],
+  ["srvForm.publicPort", "访问端口", "Access port"],
+  ["srvForm.httpToggle", "支持 HTTP 域名", "HTTP domains"],
+];
+const HELP_TARGETS = [
+  ["form.subdomain", "form.subdomainHelp"],
+  ["form.remotePort", "form.remotePortHelp"],
+  ["srvForm.authToken", "srvForm.authTokenHelp"],
+  ["srvForm.baseDomain", "srvForm.baseDomainHelp"],
+  ["srvForm.publicPort", "srvForm.publicPortHelp"],
+  ["srvForm.httpToggle", "srvForm.httpToggleHelp"],
+];
+check(
+  `小问号入口齐备（${helpKeys.length} 个 data-help / ${helpAriaKeys.length} 个 aria 均进词典）`,
+  helpKeys.length === 6 &&
+    helpAriaKeys.length === 6 &&
+    helpKeys.every((k) => k in DICT) &&
+    helpAriaKeys.every((k) => k in DICT) &&
+    HELP_TARGETS.every(([, h]) => helpKeys.includes(h)),
+  `help=${helpKeys.join(",")} aria=${helpAriaKeys.join(",")}`,
+);
+check(
+  "主 label 为短标题（与词典一致，不含括号/长解释）",
+  SHORT_TITLES.every(
+    ([k, zh, en]) => DICT[k]?.zh === zh && DICT[k]?.en === en && !/[（(]/.test(DICT[k].zh) && !/[（(]/.test(DICT[k].en),
+  ),
+  SHORT_TITLES.map(([k]) => `${k}=${DICT[k]?.zh}`).join("；"),
+);
+check(
+  "帮助文案非空、双语齐备且与短标题不同",
+  HELP_TARGETS.every(([titleKey, helpKey]) => {
+    const h = DICT[helpKey];
+    return Boolean(h?.zh?.trim()) && Boolean(h?.en?.trim()) && h.zh !== DICT[titleKey].zh && h.en !== DICT[titleKey].en;
+  }),
+  HELP_TARGETS.map(([, h]) => h).join(","),
+);
+check(
+  "HTTP 开关常驻 hint 行与旧 key 已移除（说明改由小问号承载）",
+  !html.includes("server-http-toggle-hint") &&
+    !("srvForm.httpToggleHint" in DICT) &&
+    html.includes('data-help="srvForm.httpToggleHelp"'),
+);
+
 // ---------- 汇总 ----------
 console.log(`\n===== 词典校验汇总：${pass}/${pass + fail} 通过（词典 ${keys.length} 条） =====`);
 process.exit(fail ? 1 : 0);
