@@ -82,6 +82,7 @@ var qualifiedErrorRules = map[string]int{
 	"fmt.Errorf":    0,
 	"errors.New":    0,
 	"i18n.LErr":     0,
+	"i18n.LErrArgs": 0,
 	"i18n.LErrWrap": 0,
 }
 

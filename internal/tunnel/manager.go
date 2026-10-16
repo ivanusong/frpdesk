@@ -306,7 +306,7 @@ func (m *Manager) restartLocked(notes *[]notify, server configstore.ServerConfig
 	m.statuses[server.ID] = st
 	if err := m.launchLocked(notes, server, enabled); err != nil {
 		st = configstore.ServerStatus{ServerID: server.ID, State: configstore.StateFailed,
-			Message: configstore.BriefMessage(err.Error(), 120),
+			Message:   configstore.BriefMessage(err.Error(), 120),
 			MessageEN: configstore.BriefMessage(i18n.ErrText(err), 120)}
 		m.statuses[server.ID] = st
 		// 日志本体固定英文：双语错误取英文渲染，其余（FRP/OS 原始错误）保持原文
@@ -437,7 +437,7 @@ func serviceIDs(svcs []configstore.Service) []string {
 // 必须持有 m.mu。
 func (m *Manager) stopInstanceLocked(notes *[]notify, inst *serverInstance) {
 	m.transitionLocked(notes, inst, configstore.TunnelStatus{
-		State: configstore.StateStopping,
+		State:   configstore.StateStopping,
 		Message: i18n.T("msg.stopping"), MessageEN: i18n.TLEn("msg.stopping"), MessageKey: "msg.stopping",
 	})
 	m.logLocked(notes, "info", "Stopping frpc", inst.server.ID)
@@ -502,7 +502,7 @@ func (m *Manager) sampleInstance(inst *serverInstance) {
 	inst.pending = nil
 	m.mu.Unlock()
 	if pending != nil {
-	slog.Info("[frpdesk] configuration changed while logging in; applying after connection", "server", pending.server.Name)
+		slog.Info("[frpdesk] configuration changed while logging in; applying after connection", "server", pending.server.Name)
 		m.applyProxies(inst, pending.server, pending.svcs)
 	}
 }
@@ -650,13 +650,13 @@ func (m *Manager) finishRun(inst *serverInstance, err error) {
 	case err == nil:
 		// 正常退出：无条件写终态（不可加 state!=stopped 守卫——过渡态也是 stopped）
 		m.transitionLocked(&notes, inst, configstore.TunnelStatus{
-			State: configstore.StateStopped,
+			State:   configstore.StateStopped,
 			Message: i18n.T("msg.stopped"), MessageEN: i18n.TLEn("msg.stopped"), MessageKey: "msg.stopped",
 		})
 	case inst.state == configstore.StateStopping || inst.state == configstore.StateStopped:
 		// 主动停止/取消过程中 cancel 后 Run 返回 error 的偶发路径：终态统一「frpc 已停止」
 		m.transitionLocked(&notes, inst, configstore.TunnelStatus{
-			State: configstore.StateStopped,
+			State:   configstore.StateStopped,
 			Message: i18n.T("msg.stopped"), MessageEN: i18n.TLEn("msg.stopped"), MessageKey: "msg.stopped",
 		})
 	default:

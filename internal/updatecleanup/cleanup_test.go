@@ -85,7 +85,7 @@ func TestIsStaleResidue(t *testing.T) {
 	}{
 		{"frpdesk.exe.old.1739482938123456789", "frpdesk.exe", true}, // helper 的 UnixNano 后缀
 		{"frpdesk.exe.old.0", "frpdesk.exe", true},
-		{"app[1].exe.old.42", "app[1].exe", true}, // 文件名带方括号：QuoteMeta 后精准命中
+		{"app[1].exe.old.42", "app[1].exe", true},     // 文件名带方括号：QuoteMeta 后精准命中
 		{"frpdesk.exe", "frpdesk.exe", false},         // 当前 EXE 本身绝不匹配
 		{"frpdesk.exe.old", "frpdesk.exe", false},     // 缺数字后缀
 		{"frpdesk.exe.old.", "frpdesk.exe", false},    // 空后缀
@@ -115,7 +115,7 @@ func TestRunDeletesOnlyExactMatches(t *testing.T) {
 		"frpdesk.exe.old.abc",  // 非数字后缀
 		"frpdesk.exe.old",      // 无后缀
 		"frpdesk.exe.bak",      // .bak
-		"other.exe.old.7",    // 别的 EXE 残留
+		"other.exe.old.7",      // 别的 EXE 残留
 		"frpdesk.exe.old.1.2",  // 多段后缀
 		"subfrpdesk.exe.old.7", // 前缀撞名（非精准匹配）
 	}

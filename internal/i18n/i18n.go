@@ -181,12 +181,22 @@ func Err(sentinel error, key string, args ...any) error {
 type LocalizedError struct {
 	key  string
 	args []any
-	err  error // 可选下层错误（nil = 无包装）
+	// enArgs 可选：EN 渲染专用参数（nil 时与 args 相同）。用于参数本身需分语言
+	// 构造的复合消息（如失败汇总的条目串），保证 EN() 整体无本地化残留。
+	enArgs []any
+	err    error // 可选下层错误（nil = 无包装）
 }
 
 // LErr 构造双语错误（无包装）。key 必须在词典中存在（i18n_test 兜底）。
 func LErr(key string, args ...any) *LocalizedError {
 	return &LocalizedError{key: key, args: args}
+}
+
+// LErrArgs 双语错误（分语言参数）：Error() 用 args 按当前语言渲染（UI），
+// EN() 用 enArgs 固定英文渲染（日志通道）。用于参数本身已是分语言构造的
+// 复合消息；enArgs 为 nil 时回退 args。
+func LErrArgs(key string, args, enArgs []any) *LocalizedError {
+	return &LocalizedError{key: key, args: args, enArgs: enArgs}
 }
 
 // LErrWrap 构造带下层错误的双语错误：渲染形如 "<当前语言文案>: <下层错误>"。
@@ -205,9 +215,13 @@ func (e *LocalizedError) Error() string {
 // Unwrap 透传下层错误，保留 errors.Is/As 判断链。
 func (e *LocalizedError) Unwrap() error { return e.err }
 
-// EN 固定英文渲染（环形日志通道专用；包装链逐层取英文）。
+// EN 固定英文渲染（环形/终端日志通道专用；包装链逐层取英文）。
 func (e *LocalizedError) EN() string {
-	msg := TL(EN, e.key, e.args...)
+	args := e.enArgs
+	if args == nil {
+		args = e.args
+	}
+	msg := TL(EN, e.key, args...)
 	if e.err != nil {
 		return msg + ": " + ErrText(e.err)
 	}

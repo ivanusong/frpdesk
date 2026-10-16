@@ -140,11 +140,21 @@ type ServerStatus struct {
 // 优先 MessageEN（错误详情等无 key 场景在创建点算好的英文），
 // 其次按 MessageKey 取英文词典文案；两者皆空返回空串。UI 展示仍用 Message（双语）。
 func (s TunnelStatus) LogMessage() string {
-	if s.MessageEN != "" {
-		return s.MessageEN
+	return statusLogMessage(s.MessageEN, s.MessageKey)
+}
+
+// LogMessage 同 TunnelStatus.LogMessage：失败原因等服务器级状态的日志英文渲染。
+func (s ServerStatus) LogMessage() string {
+	return statusLogMessage(s.MessageEN, s.MessageKey)
+}
+
+// statusLogMessage 日志英文消息渲染共用实现（MessageEN 优先，MessageKey 回退）。
+func statusLogMessage(messageEN, messageKey string) string {
+	if messageEN != "" {
+		return messageEN
 	}
-	if s.MessageKey != "" {
-		return i18n.TLEn(s.MessageKey)
+	if messageKey != "" {
+		return i18n.TLEn(messageKey)
 	}
 	return ""
 }
@@ -219,15 +229,10 @@ func AggregateStatus(statuses []ServerStatus, totalCount int) TunnelStatus {
 }
 
 // AggregateStatusEN 聚合状态的英文渲染（终端诊断日志通道用，不随界面语言；
-// Message 字段填英文，UI 不得使用）。失败原因优先取各状态的 MessageEN，
-// 无附注的（如 FRP 原始错误）本就英文，回退 Message。
+// Message 字段填英文，UI 不得使用）。失败原因取各状态的 LogMessage()
+// （MessageEN/英文词典，严格英文通道；FRP 原始错误类状态本就英文）。
 func AggregateStatusEN(statuses []ServerStatus, totalCount int) TunnelStatus {
-	return aggregateStatus(statuses, totalCount, i18n.TLEn, func(s ServerStatus) string {
-		if s.MessageEN != "" {
-			return s.MessageEN
-		}
-		return s.Message
-	})
+	return aggregateStatus(statuses, totalCount, i18n.TLEn, func(s ServerStatus) string { return s.LogMessage() })
 }
 
 // aggregateStatus 聚合实现：tr 选渲染语言，reasonOf 选失败原因来源
@@ -616,7 +621,7 @@ func buildServer(input ServerInput, existing []ServerConfig, excludeID string) (
 	}
 	for _, s := range existing {
 		if s.ID != excludeID && s.Name == name {
-			return ServerConfig{}, i18n.LErr("err.nameExists",  name)
+			return ServerConfig{}, i18n.LErr("err.nameExists", name)
 		}
 	}
 
@@ -637,7 +642,7 @@ func buildServer(input ServerInput, existing []ServerConfig, excludeID string) (
 	key := serverEndpointKey(addr, port)
 	for _, s := range existing {
 		if s.ID != excludeID && serverEndpointKey(s.ServerAddr, s.ServerPort) == key {
-			return ServerConfig{}, i18n.LErr("err.endpointExists",  s.ServerAddr, s.ServerPort, s.Name)
+			return ServerConfig{}, i18n.LErr("err.endpointExists", s.ServerAddr, s.ServerPort, s.Name)
 		}
 	}
 
@@ -712,7 +717,7 @@ func (s *Store) UpdateServer(id string, input ServerInput) (Config, error) {
 	// 能力收回校验：仍有 HTTP 隧道引用（含停用）时禁止关闭 HTTP 支持
 	if old.HTTPEnabled && !updated.HTTPEnabled {
 		if n := s.httpRefCountLocked(id); n > 0 {
-			return s.cloneConfig(), i18n.LErr("err.httpRefCount",  n)
+			return s.cloneConfig(), i18n.LErr("err.httpRefCount", n)
 		}
 	}
 	for i := range s.cfg.Servers {
@@ -742,7 +747,7 @@ func (s *Store) DeleteServer(id string) (Config, error) {
 		}
 	}
 	if refs > 0 {
-		return s.cloneConfig(), i18n.LErr("err.tunnelRefCount",  refs)
+		return s.cloneConfig(), i18n.LErr("err.tunnelRefCount", refs)
 	}
 	kept := s.cfg.Servers[:0]
 	for _, sv := range s.cfg.Servers {
@@ -849,7 +854,7 @@ func (s *Store) buildServiceLocked(input ServiceInput, excludeID string) (Servic
 		return Service{}, i18n.LErr("err.typeInvalid")
 	}
 	if svcType == TypeHTTP && !server.HTTPEnabled {
-		return Service{}, i18n.LErr("err.httpNotSupported",  server.Name)
+		return Service{}, i18n.LErr("err.httpNotSupported", server.Name)
 	}
 
 	out := Service{
@@ -871,7 +876,7 @@ func (s *Store) buildServiceLocked(input ServiceInput, excludeID string) (Servic
 		// 跨服务器允许复用）
 		for _, svc := range s.cfg.Services {
 			if svc.ID != excludeID && svc.ServerID == server.ID && svc.Type == svcType && svc.RemotePort == input.RemotePort {
-				return Service{}, i18n.LErr("err.remotePortTaken",  strings.ToUpper(svcType), input.RemotePort)
+				return Service{}, i18n.LErr("err.remotePortTaken", strings.ToUpper(svcType), input.RemotePort)
 			}
 		}
 		out.RemotePort = input.RemotePort
@@ -887,7 +892,7 @@ func (s *Store) buildServiceLocked(input ServiceInput, excludeID string) (Servic
 			}
 			// subdomainOwnedByLocked 已排除被编辑服务自身：保留自己的前缀不算重复
 			if s.subdomainOwnedByLocked(sub, server.ID, excludeID) {
-				return Service{}, i18n.LErr("err.subdomainExists",  sub)
+				return Service{}, i18n.LErr("err.subdomainExists", sub)
 			}
 		}
 		out.Subdomain = sub

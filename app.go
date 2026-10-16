@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -384,25 +383,37 @@ func (a *AppService) DeleteServer(id string) (configstore.Snapshot, error) {
 }
 
 // summarizeFailures 汇总当前失败服务器的可读原因（无失败返回 nil）。
+// 错误本体为双语错误：Error() 当前语言（toast 等 UI），ErrText()/EN() 固定英文
+// （终端日志通道零中文）；条目与分隔符在构造时按两种语言分别拼接。
 func (a *AppService) summarizeFailures() error {
-	snap := a.Snapshot()
-	var failed []string
+	return summarizeFailedServers(a.Snapshot())
+}
+
+// summarizeFailedServers 纯函数：从快照汇总失败服务器（便于单测，不依赖运行实例）。
+func summarizeFailedServers(snap configstore.Snapshot) error {
+	var zhItems, enItems []string
 	for _, st := range snap.ServerStatuses {
-		if st.State == configstore.StateFailed {
-			name := st.ServerID
-			for i := range snap.Config.Servers {
-				if snap.Config.Servers[i].ID == st.ServerID {
-					name = snap.Config.Servers[i].Name
-					break
-				}
-			}
-			failed = append(failed, i18n.T("msg.failureItem", name, st.Message))
+		if st.State != configstore.StateFailed {
+			continue
 		}
+		name := st.ServerID
+		for i := range snap.Config.Servers {
+			if snap.Config.Servers[i].ID == st.ServerID {
+				name = snap.Config.Servers[i].Name
+				break
+			}
+		}
+		// UI 条目用当前语言 Message；英文条目标用 LogMessage()（MessageEN/英文词典）
+		zhItems = append(zhItems, i18n.T("msg.failureItem", name, st.Message))
+		enItems = append(enItems, i18n.TLEn("msg.failureItem", name, st.LogMessage()))
 	}
-	if len(failed) == 0 {
+	if len(zhItems) == 0 {
 		return nil
 	}
-	return errors.New(i18n.T("msg.startFailed", len(failed), strings.Join(failed, i18n.T("msg.failureJoin"))))
+	// 分语言参数：Error() 中文拼接（UI），EN() 英文拼接（日志通道）
+	return i18n.LErrArgs("msg.startFailed",
+		[]any{len(zhItems), strings.Join(zhItems, i18n.T("msg.failureJoin"))},
+		[]any{len(enItems), strings.Join(enItems, i18n.TLEn("msg.failureJoin"))})
 }
 
 // ---------- 隧道 CRUD ----------
