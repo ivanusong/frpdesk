@@ -283,6 +283,7 @@ function refreshOpenModalI18n() {
 // 打开中的模态动态文案，全部从内存/已有状态重渲染，不丢用户数据、不重启隧道。
 function applyLanguage() {
   applyStaticI18n();
+  positionTabSlider(true); // Tab 文案宽度随语言变化，指示条需立即按新尺寸测量
   applyTheme(document.documentElement.dataset.theme ?? "system", false);
   renderLangButton();
   if (state.snapshot) {

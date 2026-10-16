@@ -50,6 +50,7 @@ class El {
     this.scrollTop = 0;
     this.scrollHeight = 0;
     this.offsetWidth = 0;
+    this.offsetLeft = 0;
   }
   get classList() {
     const self = this;
@@ -1025,12 +1026,18 @@ const bizCount = () => appStub.calls.filter((c) => ["SetServiceEnabled", "Create
 check("S10 初始：偏好 zh-CN 且 html lang=zh-CN", storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN", String(document.documentElement.lang));
 const tabTunnels = document.querySelector('.tab[data-tab="tunnels"]');
 const langBtn = () => document.getElementById("btn-lang");
+const langSlider = document.getElementById("tab-slider");
+tabTunnels.offsetWidth = 88;
+tabTunnels.offsetLeft = 12;
+langSlider.style.width = "40px";
+langSlider.style.left = "10px";
 check("S10 初始：静态 Tab 为中文且语言按钮为紧凑「中」态", tabTunnels.textContent === "隧道" && langBtn().textContent === "中" && (langBtn().title || "").includes("语言：中文") && (langBtn().title || "").includes("切换到 English"), langBtn().title);
 
 // 记录切换前业务调用数：切语言绝不能触发隧道/服务 RPC
 const bizBefore = bizCount();
 
 await T.setLanguagePref("en");
+check("S10 切英文：Tab 指示条按新文案重新定位", langSlider.style.width === "64px" && langSlider.style.left === "24px", `${langSlider.style.width} / ${langSlider.style.left}`);
 check("S10 切英文：html lang 与 localStorage 持久化", document.documentElement.lang === "en" && storage.get("frpdesk.language") === "en");
 check("S10 切英文：语言按钮为「EN」态且 tip/aria 指向切回中文", langBtn().textContent === "EN" && (langBtn().title || "").includes("Language: English") && (langBtn().getAttribute("aria-label") || "").includes("switch to 中文"), `${langBtn().textContent} / ${langBtn().title} / ${langBtn().getAttribute("aria-label")}`);
 check("S10 切英文：静态文案（Tab/按钮/空态属性）", tabTunnels.textContent === "Tunnels" && document.getElementById("btn-add-http").textContent.includes("Add HTTP") && document.getElementById("service-empty").textContent.includes("No tunnels yet"));
