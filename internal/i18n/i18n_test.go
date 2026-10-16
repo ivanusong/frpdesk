@@ -52,11 +52,12 @@ func TestDictCompleteness(t *testing.T) {
 	}
 }
 
-// TestSourceKeysExist 源码 key 对齐：所有 i18n.T("key")、i18n.Err(err, "key") 与
-// MessageKey: "key" 引用的 key 必须在 dict 中存在（防止新增文案时漏进词典，
-// 运行时以 key 形式直接展示给用户）。扫描范围排除 third_party 与 frontend。
+// TestSourceKeysExist 源码 key 对齐：所有 i18n.T("key")、i18n.Err(err, "key")、
+// i18n.LErr/LErrWrap("key") 与 MessageKey: "key" 引用的 key 必须在 dict 中存在
+//（防止新增文案时漏进词典，运行时以 key 形式直接展示给用户）。
+// 扫描范围排除 third_party 与 frontend。
 func TestSourceKeysExist(t *testing.T) {
-	re := regexp.MustCompile(`(?:i18n\.T\(|MessageKey:\s*|i18n\.Err\([^,]+,\s*)"([a-z][A-Za-z]*\.[A-Za-z]+)"`)
+	re := regexp.MustCompile(`(?:i18n\.T\(|MessageKey:\s*|i18n\.Err\([^,]+,\s*|i18n\.LErrWrap\(\s*|i18n\.LErr\(\s*)"([a-z][A-Za-z]*\.[A-Za-z]+)"`)
 	root := filepath.Join("..", "..")
 	found := 0
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

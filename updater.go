@@ -164,7 +164,7 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 	c.mu.Unlock()
 
 	if isDev {
-		c.log("warn", "[更新] 当前为开发版（currentVersion=%q），更新检查与安装已禁用", version)
+		c.log("warn", "[update] Development build (currentVersion=%q); update checks and install are disabled", version)
 		c.notify()
 		return
 	}
@@ -174,7 +174,7 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 		c.info.State = updDisabled
 		c.info.Message = i18n.T("upd.noManifest")
 		c.mu.Unlock()
-		c.log("warn", "[更新] 未配置更新源，更新检查与安装已禁用（构建时可设置 UPDATE_MANIFEST_URL / UPDATE_MIRROR_BASE_URL）")
+		c.log("warn", "[update] No update source configured; update checks and install are disabled (set UPDATE_MANIFEST_URL / UPDATE_MIRROR_BASE_URL at build time)")
 		c.notify()
 		return
 	}
@@ -185,13 +185,13 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 		log:           c.log,
 	})
 	if err != nil {
-		c.log("error", "[更新] 初始化更新源失败：%v", err)
+		c.log("error", "[update] Failed to initialize update sources: %v", err)
 		c.applyState(updError, i18n.T("upd.manifestInitFail", configstore.BriefMessage(err.Error(), 120)))
 		return
 	}
 	mirrorDesc := c.mirrorURL
 	if mirrorDesc == "" {
-		mirrorDesc = "未配置"
+		mirrorDesc = "not configured"
 	}
 
 	// 刻意不设置 CheckInterval（框架定时器会 CheckAndInstall 自动安装），
@@ -201,12 +201,12 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 		Providers:      []updater.Provider{prov},
 		Window:         updater.WindowNone, // 无框架更新窗口；后台检查绝不弹窗
 	}); err != nil {
-		c.log("error", "[更新] 框架更新器初始化失败：%v", err)
+		c.log("error", "[update] Failed to initialize the framework updater: %v", err)
 		c.applyState(updError, i18n.T("upd.initFail", configstore.BriefMessage(err.Error(), 120)))
 		return
 	}
 
-	c.log("info", "[更新] 更新器就绪：当前版本 %s，主源 %s，镜像 %s，每 %s 自动检查（仅检查不安装）",
+	c.log("info", "[update] Updater ready: current version %s, primary %s, mirror %s, auto check every %s (check only, never install)",
 		version, c.manifestURL, mirrorDesc, updateCheckInterval)
 	c.notify()
 
@@ -220,29 +220,29 @@ func (c *updaterController) periodicLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			c.log("info", "[更新] 后台定时检查已停止")
+			c.log("info", "[update] Background periodic check stopped")
 			return
 		case <-t.C:
-			c.log("info", "[更新] 定时检查触发（周期 %s）", updateCheckInterval)
-			_, _ = c.check("自动定时检查")
+			c.log("info", "[update] Periodic check triggered (interval %s)", updateCheckInterval)
+			_, _ = c.check("periodic check")
 		}
 	}
 }
 
 // startupCheck 启动后的首次检查（ServiceStartup 中以 goroutine 调用，不阻塞启动）。
 func (c *updaterController) startupCheck() {
-	c.log("info", "[更新] 启动检查开始（当前版本 %s）", c.snapshot().CurrentVersion)
-	_, _ = c.check("启动检查")
+	c.log("info", "[update] Startup check started (current version %s)", c.snapshot().CurrentVersion)
+	_, _ = c.check("startup check")
 }
 
 // check 执行一次更新检查。source 标记触发来源（手动/启动/定时），仅用于日志。
 func (c *updaterController) check(source string) (UpdateInfo, error) {
 	if c.disabled() {
-		c.log("warn", "[更新] %s被拒绝：开发版禁用更新检查", source)
+		c.log("warn", "[update] %s rejected: update checks are disabled in development builds", source)
 		return c.snapshot(), i18n.Err(errUpdaterDisabled, "err.updaterDisabled")
 	}
 	if err := c.ctx.Err(); err != nil {
-		c.log("warn", "[更新] %s被拒绝：应用正在退出", source)
+		c.log("warn", "[update] %s rejected: the app is quitting", source)
 		return c.snapshot(), i18n.Err(errUpdaterShuttingD, "err.updaterShuttingDown")
 	}
 	fw := c.current()
@@ -252,12 +252,12 @@ func (c *updaterController) check(source string) (UpdateInfo, error) {
 	// 操作互斥：与下载/重启流程全程互斥（含框架 Check 调用期间），忙时明确拒绝。
 	// 持锁期间 state 只会由本流程推进，不存在并发流程同时开始的窗口。
 	if !c.opMu.TryLock() {
-		c.log("warn", "[更新] %s被拒绝：已有更新操作（检查/下载/重启）在进行", source)
+		c.log("warn", "[update] %s rejected: another update operation (check/download/restart) is in progress", source)
 		return c.snapshot(), i18n.Err(errUpdaterBusy, "err.updaterBusy")
 	}
 	defer c.opMu.Unlock()
 
-	c.log("info", "[更新] %s：正在检查（当前版本 %s，源 %s）",
+	c.log("info", "[update] %s: checking (current version %s, source %s)",
 		source, c.snapshot().CurrentVersion, c.manifestURL)
 	c.applyState(updChecking, "")
 
@@ -265,7 +265,7 @@ func (c *updaterController) check(source string) (UpdateInfo, error) {
 	defer cancel()
 	rel, err := fw.Check(ctx)
 	if err != nil {
-		c.log("error", "[更新] %s失败：%v", source, err)
+		c.log("error", "[update] %s failed: %v", source, err)
 		// 失败保留 latestVersion：已有发现不被错误回退，UI 可重试
 		c.applyState(updError, i18n.T("upd.checkFail", configstore.BriefMessage(err.Error(), 120)))
 		return c.snapshot(), err
@@ -273,12 +273,12 @@ func (c *updaterController) check(source string) (UpdateInfo, error) {
 	if rel == nil {
 		// 无新版：按约定清空 latestVersion，UI 收起更新按钮；
 		// 已 staged 的旧包随版本确认作废
-		c.log("info", "[更新] %s结果：已是最新版本（%s）", source, c.snapshot().CurrentVersion)
+		c.log("info", "[update] %s result: already up to date (%s)", source, c.snapshot().CurrentVersion)
 		c.invalidateStaged()
 		c.applyState(updUpToDate, i18n.T("upd.upToDate"), true)
 		return c.snapshot(), nil
 	}
-	c.log("info", "[更新] %s结果：发现新版本 %s（当前 %s），等待用户确认安装",
+	c.log("info", "[update] %s result: new version %s found (current %s); waiting for user confirmation to install",
 		source, rel.Version, c.snapshot().CurrentVersion)
 	c.setLatest(rel.Version, rel.Notes)
 	c.applyState(updAvailable, i18n.T("upd.available", rel.Version))
@@ -292,11 +292,11 @@ func (c *updaterController) check(source string) (UpdateInfo, error) {
 // 同版已 staged（上次重启失败）时直接重试重启，不重复下载。
 func (c *updaterController) install() error {
 	if c.disabled() {
-		c.log("warn", "[更新] 安装被拒绝：开发版禁用更新")
+		c.log("warn", "[update] Install rejected: updates are disabled in development builds")
 		return i18n.Err(errUpdaterDisabled, "err.updaterDisabled")
 	}
 	if err := c.ctx.Err(); err != nil {
-		c.log("warn", "[更新] 安装被拒绝：应用正在退出")
+		c.log("warn", "[update] Install rejected: the app is quitting")
 		return i18n.Err(errUpdaterShuttingD, "err.updaterShuttingDown")
 	}
 	fw := c.current()
@@ -305,26 +305,26 @@ func (c *updaterController) install() error {
 	}
 	// 操作互斥：与检查及另一安装流程全程互斥（含框架 Download/Restart 调用期间）
 	if !c.opMu.TryLock() {
-		c.log("warn", "[更新] 安装被拒绝：已有更新操作（检查/下载/重启）在进行")
+		c.log("warn", "[update] Install rejected: another update operation (check/download/restart) is in progress")
 		return i18n.Err(errUpdaterBusy, "err.updaterBusy")
 	}
 	defer c.opMu.Unlock()
 
 	snap := c.snapshot()
 	if snap.LatestVersion == "" {
-		c.log("warn", "[更新] 安装被拒绝：尚未检查到新版本")
+		c.log("warn", "[update] Install rejected: no new version has been checked yet")
 		return i18n.Err(errNoPendingUpdate, "err.noPendingUpdate")
 	}
 
 	// 同版更新包已就绪（上次重启失败）：跳过下载直接重启；
 	// 版本不匹配（检查发现了更新的版本）则走下方完整下载流程
 	if c.stagedVersionSnapshot() == snap.LatestVersion {
-		c.log("info", "[更新] 版本 %s 更新包已就绪，重试重启（跳过下载）", snap.LatestVersion)
+		c.log("info", "[update] Version %s package is ready; retrying restart (skipping download)", snap.LatestVersion)
 		c.applyState(updInstalling, i18n.T("upd.restarting"))
 		return c.finishInstall(snap.LatestVersion)
 	}
 
-	c.log("info", "[更新] 用户确认安装：开始下载版本 %s（当前 %s，源 %s）",
+	c.log("info", "[update] Install confirmed by user: downloading version %s (current %s, source %s)",
 		snap.LatestVersion, snap.CurrentVersion, c.manifestURL)
 	c.applyState(updDownloading, i18n.T("upd.downloading"))
 	c.setProgress(0, i18n.T("upd.downloading"))
@@ -333,10 +333,10 @@ func (c *updaterController) install() error {
 	defer cancel()
 	if err := fw.DownloadAndInstall(ctx); err != nil {
 		if c.ctx.Err() != nil {
-			c.log("warn", "[更新] 下载安装中断（应用退出）：%v", err)
+			c.log("warn", "[update] Download/install interrupted (app quitting): %v", err)
 			return err
 		}
-		c.log("error", "[更新] 版本 %s 下载/校验/安装失败：%v", snap.LatestVersion, err)
+		c.log("error", "[update] Version %s download/verify/install failed: %v", snap.LatestVersion, err)
 		// 保留 latestVersion，UI 可重试；实际错误直接返回前端
 		c.applyState(updError, i18n.T("upd.installFail", configstore.BriefMessage(err.Error(), 120)))
 		return err
@@ -344,7 +344,7 @@ func (c *updaterController) install() error {
 	c.mu.Lock()
 	c.stagedVersion = snap.LatestVersion
 	c.mu.Unlock()
-	c.log("info", "[更新] 版本 %s 下载校验完成，已就绪待重启", snap.LatestVersion)
+	c.log("info", "[update] Version %s downloaded and verified; ready to restart", snap.LatestVersion)
 	c.applyState(updReady, i18n.T("upd.ready"))
 	c.setProgress(100, i18n.T("upd.ready"))
 
@@ -363,14 +363,14 @@ func (c *updaterController) finishInstall(version string) error {
 	defer cancel()
 	if err := fw.Restart(ctx); err != nil {
 		if c.ctx.Err() != nil {
-			c.log("warn", "[更新] 重启中断（应用退出）：%v", err)
+			c.log("warn", "[update] Restart interrupted (app quitting): %v", err)
 			return err
 		}
-		c.log("error", "[更新] 版本 %s 重启失败（更新包已就绪，可直接重试安装）：%v", version, err)
+		c.log("error", "[update] Restart for version %s failed (package is ready; retry install directly): %v", version, err)
 		c.applyState(updError, i18n.T("upd.restartFail", configstore.BriefMessage(err.Error(), 120)))
 		return err
 	}
-	c.log("info", "[更新] 版本 %s 重启流程已启动：helper 就绪，宿主即将正常退出并替换二进制", version)
+	c.log("info", "[update] Restart initiated for version %s: helper ready, host will exit normally and swap the binary", version)
 	// 收敛到 ready 终态（覆盖 staged 重试路径的 installing 过渡态）；
 	// 宿主正常退出链（含 ServiceShutdown 停隧道）由框架 host.Quit 触发
 	c.applyState(updReady, i18n.T("upd.restarting"))
@@ -426,7 +426,7 @@ func (c *updaterController) onVerifying() {
 	c.info.State = updVerifying
 	c.info.Message = i18n.T("upd.verifying")
 	c.mu.Unlock()
-	c.log("info", "[更新] 更新包校验开始")
+	c.log("info", "[update] Update package verification started")
 	c.notify()
 }
 
@@ -444,14 +444,14 @@ func (c *updaterController) onInstalling() {
 	c.info.State = updInstalling
 	c.info.Message = i18n.T("upd.installing")
 	c.mu.Unlock()
-	c.log("info", "[更新] 更新包安装（staging）开始")
+	c.log("info", "[update] Update package install (staging) started")
 	c.notify()
 }
 
 // shutdown 生命周期收尾（ServiceShutdown 调用）：取消后台定时检查与进行中的检查/下载。
 func (c *updaterController) shutdown() {
 	c.cancel()
-	c.log("info", "[更新] 生命周期结束：已取消后台检查与进行中的更新操作")
+	c.log("info", "[update] Shutdown: background checks and in-flight update operations canceled")
 }
 
 // --- 状态与快照 ---

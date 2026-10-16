@@ -160,6 +160,7 @@ func (a *AppService) attachUI(app *application.App, window *application.WebviewW
 
 // logUpdate 更新日志双写：slog 落终端 + 应用日志环形缓冲推前端（app:logs）。
 // 经 Manager.AppendLog 写入，只追加日志，不推进实例状态机。
+// 消息本体约定固定英文（守卫见 log_language_test.go），调用方勿传中文模板。
 func (a *AppService) logUpdate(level, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	switch level {
@@ -179,8 +180,9 @@ func (a *AppService) UpdateInfo() UpdateInfo {
 }
 
 // CheckForUpdates 手动检查更新（与启动/定时检查互斥，忙时返回明确错误）。
+// 来源标签进入日志通道，约定固定英文（不随界面语言翻译）。
 func (a *AppService) CheckForUpdates() (UpdateInfo, error) {
-	return a.up.check("手动检查")
+	return a.up.check("manual check")
 }
 
 // InstallUpdate 用户确认后的下载安装重启（无已检查新版时返回明确错误）。
@@ -195,13 +197,14 @@ func (a *AppService) showMainWindow() {
 	}
 }
 
-// FrontendLog 接收前端侧诊断/错误日志（可观测性通道）。
+// FrontendLog 接收前端侧诊断/错误日志（可观测性通道；前端保证消息本体英文，
+// 界面 toast 等可见文案仍走前端词典双语）。
 func (a *AppService) FrontendLog(level, message string) error {
 	switch level {
 	case "error":
-		slog.Error("[前端] " + message)
+		slog.Error("[frontend] " + message)
 	default:
-		slog.Info("[前端] " + message)
+		slog.Info("[frontend] " + message)
 	}
 	return nil
 }

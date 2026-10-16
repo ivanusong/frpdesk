@@ -953,8 +953,16 @@ func generateSubdomain(existing map[string]bool) string {
 // 地址必填；enabled 隧道数必须 ≥1（无隧道不空连）；
 // enabled 的 HTTP 隧道要求目标服务器支持 HTTP（归属悬空在 Config 层已挡）。
 func ValidateServerStart(server ServerConfig, svcs []Service) string {
+	msg, _, _ := ValidateServerStartKeyed(server, svcs)
+	return msg
+}
+
+// ValidateServerStartKeyed 校验并返回（当前语言消息， 稳定 key， key 参数）：
+// 校验通过返回空 key。msg 供状态/错误等 UI（继续双语），key+args 供日志通道
+// 经 i18n.TL(i18n.EN, ...) 固定英文重渲染（环形日志不随界面语言翻译）。
+func ValidateServerStartKeyed(server ServerConfig, svcs []Service) (msg, key string, args []any) {
 	if trimSpace(server.ServerAddr) == "" {
-		return i18n.T("msg.noAddr")
+		return i18n.T("msg.noAddr"), "msg.noAddr", nil
 	}
 	enabled := 0
 	for _, svc := range svcs {
@@ -962,14 +970,14 @@ func ValidateServerStart(server ServerConfig, svcs []Service) string {
 			continue
 		}
 		if svc.Type == TypeHTTP && !server.HTTPEnabled {
-			return i18n.T("msg.httpDisabledSvc", server.Name, svc.Name)
+			return i18n.T("msg.httpDisabledSvc", server.Name, svc.Name), "msg.httpDisabledSvc", []any{server.Name, svc.Name}
 		}
 		enabled++
 	}
 	if enabled == 0 {
-		return i18n.T("msg.noEnabled", server.Name)
+		return i18n.T("msg.noEnabled", server.Name), "msg.noEnabled", []any{server.Name}
 	}
-	return ""
+	return "", "", nil
 }
 
 // PublicURL 拼接 HTTP 隧道的公网访问地址：

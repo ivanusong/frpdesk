@@ -1006,13 +1006,15 @@ wailsListeners["app:proxies"][0]({ data: [{ serviceId: "svc1", state: "registere
 const bizCount = () => appStub.calls.filter((c) => ["SetServiceEnabled", "CreateService", "UpdateService", "DeleteService", "CreateServer", "UpdateServer", "DeleteServer"].includes(c.name)).length;
 check("S10 初始：偏好 zh-CN 且 html lang=zh-CN", storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN", String(document.documentElement.lang));
 const tabTunnels = document.querySelector('.tab[data-tab="tunnels"]');
-check("S10 初始：静态 Tab 为中文且语言按钮 tip 可读", tabTunnels.textContent === "隧道" && (document.getElementById("btn-lang").title || "").includes("语言："), document.getElementById("btn-lang").title);
+const langBtn = () => document.getElementById("btn-lang");
+check("S10 初始：静态 Tab 为中文且语言按钮为紧凑「中」态", tabTunnels.textContent === "隧道" && langBtn().textContent === "中" && (langBtn().title || "").includes("语言：中文") && (langBtn().title || "").includes("切换到 English"), langBtn().title);
 
 // 记录切换前业务调用数：切语言绝不能触发隧道/服务 RPC
 const bizBefore = bizCount();
 
 await T.setLanguagePref("en");
 check("S10 切英文：html lang 与 localStorage 持久化", document.documentElement.lang === "en" && storage.get("frpdesk.language") === "en");
+check("S10 切英文：语言按钮为「EN」态且 tip/aria 指向切回中文", langBtn().textContent === "EN" && (langBtn().title || "").includes("Language: English") && (langBtn().getAttribute("aria-label") || "").includes("switch to 中文"), `${langBtn().textContent} / ${langBtn().title} / ${langBtn().getAttribute("aria-label")}`);
 check("S10 切英文：静态文案（Tab/按钮/空态属性）", tabTunnels.textContent === "Tunnels" && document.getElementById("btn-add-http").textContent.includes("Add HTTP") && document.getElementById("service-empty").textContent.includes("No tunnels yet"));
 check("S10 切英文：动态状态栏", document.getElementById("status-label").textContent === "Connected" && document.getElementById("service-count").title === "Currently mapped tunnels", `${document.getElementById("status-label").textContent} / ${document.getElementById("service-count").title}`);
 check("S10 切英文：动态卡片操作/徽章", document.querySelector("#service-list .service-item .svc-op--r1")?.getAttribute("title") === "Edit" && document.querySelector("#service-list .service-item .tag-ok")?.textContent === "Registered", `${document.querySelector("#service-list .service-item .svc-op--r1")?.getAttribute("title")} / ${document.querySelector("#service-list .service-item .tag")?.textContent}`);
@@ -1020,21 +1022,38 @@ check("S10 切英文：服务器卡操作文案", document.querySelector('#serve
 check("S10 切英文：后端同步 SetLanguage(en)", appStub.calls.filter((c) => c.name === "SetLanguage").at(-1)?.args?.[0] === "en");
 check("S10 切英文：不触发任何隧道/配置业务调用", bizCount() === bizBefore);
 
-// 语言按钮接线：zh-CN→en（已就位）→ system（后端 resolved）→ zh-CN
-document.getElementById("btn-lang").click();
+// 语言按钮：中/EN 两态显式切换（zh-CN ⇄ en），不再有三态循环、不会回到 system
+langBtn().click();
 await sleep(20);
-check("S10 按钮循环：en → system（采用后端 resolved=en）", storage.get("frpdesk.language") === "system" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels", `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`);
-document.getElementById("btn-lang").click();
+check(
+  "S10 按钮两态：en → zh-CN（持久化显式偏好）",
+  storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN" && tabTunnels.textContent === "隧道" && langBtn().textContent === "中",
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang} btn=${langBtn().textContent}`,
+);
+langBtn().click();
 await sleep(20);
-check("S10 按钮循环：system → zh-CN", storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN" && tabTunnels.textContent === "隧道");
+check(
+  "S10 按钮两态：zh-CN → en（不回到 system）",
+  storage.get("frpdesk.language") === "en" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels" && langBtn().textContent === "EN",
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang} btn=${langBtn().textContent}`,
+);
 
 // ---------- S10a：system 采用后端 resolved（不自行判定） ----------
+// system 偏好保留：首启/无偏好仍由后端解析系统语言；按钮在 system 下显示
+// 当前生效语言，点击切到另一显式语言并持久化，不回到 system
 appStub.langSystemResolved = "en"; // 后端判定 en（本机 Node 前端解析可能不同）
 await T.setLanguagePref("system");
 check(
   "S10a system 采用后端 resolved=en（前后端一致）",
-  storage.get("frpdesk.language") === "system" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels",
-  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`,
+  storage.get("frpdesk.language") === "system" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels" && langBtn().textContent === "EN",
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang} btn=${langBtn().textContent}`,
+);
+langBtn().click();
+await sleep(20);
+check(
+  "S10a system 下点击按钮：切到显式 zh-CN（不回 system）",
+  storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN" && langBtn().textContent === "中",
+  `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang} btn=${langBtn().textContent}`,
 );
 appStub.langSystemResolved = "zh-CN";
 await T.setLanguagePref("system");
@@ -1158,6 +1177,27 @@ await sleep(450);
 await T.setLanguagePref("zh-CN");
 check("S10 收尾：恢复中文", document.documentElement.lang === "zh-CN" && document.getElementById("status-label").textContent === "已连接");
 check("S10 全程不触发任何隧道/配置业务调用", bizCount() === bizBefore, `biz=${bizCount()} before=${bizBefore}`);
+
+// ---------- 场景 S11：日志面板固定英文与公共归属 System ----------
+// 日志内容不随界面语言翻译：中英文界面下同一 LogEntry 渲染一致；
+// 无归属条目固定标 System（非「系统」双语）。
+const logEntry = { id: 9001, timestamp: "2025-01-01 00:00:00", level: "info", message: "[frpdesk] Stopping frpc", serverId: "", serverName: "" };
+wailsListeners["app:logs"][0]({ data: [logEntry] });
+const logView = () => document.getElementById("log-view");
+const logRendered = () => logView().innerHTML || "";
+check(
+  "S11 日志条目渲染且公共归属为 System",
+  logRendered().includes("[System]") && logRendered().includes("[frpdesk] Stopping frpc") && !logRendered().includes("系统"),
+  logRendered().slice(-200),
+);
+await T.setLanguagePref("en");
+const logEn = logRendered();
+await T.setLanguagePref("zh-CN");
+check(
+  "S11 切换语言后日志内容不变（不随界面语言翻译）",
+  logRendered() === logEn && logRendered().includes("[System]") && logRendered().includes("[frpdesk] Stopping frpc"),
+  logRendered().slice(-200),
+);
 
 // ---------- 服务器卡片专用 CSS ----------
 check("服务器卡无 hover 隐藏/translate 残留", !css.includes(".server-item .svc-op"));

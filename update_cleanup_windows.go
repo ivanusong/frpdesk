@@ -17,7 +17,8 @@ import (
 func (a *AppService) startUpdateCleanup() {
 	exe, err := os.Executable()
 	if err != nil {
-		a.logUpdate("warn", "[更新] 无法定位当前可执行文件，跳过更新残留清理：%v", err)
+		// 日志通道（含环形缓冲）约定固定英文；详见 log_language_test.go 守卫
+		a.logUpdate("warn", "[update] Failed to locate the current executable; skipping update residue cleanup: %v", err)
 		return
 	}
 	updatecleanup.Start(a.up.ctx, updatecleanup.Options{

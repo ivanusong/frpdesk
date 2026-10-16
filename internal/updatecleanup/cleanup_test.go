@@ -146,10 +146,10 @@ func TestRunDeletesOnlyExactMatches(t *testing.T) {
 	if removed != 1 {
 		t.Errorf("删除调用次数 = %d, want 1（仅精准匹配的常规残留）", removed)
 	}
-	if logs.contains("失败") {
+	if logs.contains("failed") {
 		t.Errorf("不应有失败日志：%v", logs.line)
 	}
-	if !logs.contains("更新残留清理完成") {
+	if !logs.contains("cleanup finished") {
 		t.Errorf("应记完成日志：%v", logs.line)
 	}
 	_ = stale
@@ -211,7 +211,7 @@ func TestRunRetryOccupiedThenSuccess(t *testing.T) {
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("重试后残留应被真正删除，stat err = %v", err)
 	}
-	if !logs.contains("删除更新残留失败") || !logs.contains("更新残留清理完成") {
+	if !logs.contains("Failed to remove some update residue") || !logs.contains("cleanup finished") {
 		t.Errorf("应记失败与完成日志：%v", logs.line)
 	}
 }
@@ -244,7 +244,7 @@ func TestRunRetryLimit(t *testing.T) {
 	if n != 6 { // 3 次尝试 × 2 个残留
 		t.Errorf("Remove 调用次数 = %d, want 6（恰好 3 轮尝试后停止）", n)
 	}
-	if got := logs.count("已达重试上限"); got != 1 {
+	if got := logs.count("retry limit reached"); got != 1 {
 		t.Errorf("最终失败 warn 日志条数 = %d, want 1：%v", got, logs.line)
 	}
 }
@@ -287,7 +287,7 @@ func TestRunCancelDuringWait(t *testing.T) {
 	if n != 0 {
 		t.Errorf("取消后不得发起删除，Remove 调用次数 = %d", n)
 	}
-	if !logs.contains("已取消") {
+	if !logs.contains("canceled") {
 		t.Errorf("应记取消日志：%v", logs.line)
 	}
 }
@@ -298,10 +298,10 @@ func TestRunScanFailureRetriesWithoutReportingSuccess(t *testing.T) {
 		Dir: filepath.Join(t.TempDir(), "missing"), ExeBase: "frpdesk.exe",
 		MaxAttempts: 3, Delay: time.Millisecond, Log: logs.logf,
 	})
-	if logs.count("扫描更新残留失败") != 3 || logs.count("已达重试上限") != 1 {
+	if logs.count("Failed to scan update residue") != 3 || logs.count("retry limit") != 1 {
 		t.Fatalf("扫描失败应有界重试：%v", logs.line)
 	}
-	if logs.contains("清理完成") {
+	if logs.contains("finished") {
 		t.Fatalf("扫描失败不得报告清理成功：%v", logs.line)
 	}
 }

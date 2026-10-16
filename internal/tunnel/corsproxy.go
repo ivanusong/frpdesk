@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -63,7 +62,8 @@ func newCORSProxy(set *corsProxySet, localHost string, localPort int, serviceID 
 	target := net.JoinHostPort(localHost, strconv.Itoa(localPort))
 	ln, err := listenCORSProxy()
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.T("err.listenProxyFail"), err)
+		// 双语错误：状态/错误 UI 按当前语言，环形日志经 i18n.ErrText 固定英文
+		return nil, i18n.LErrWrap("err.listenProxyFail", err)
 	}
 
 	// 上游连接池每实例独占：不污染全局 DefaultTransport，Close 时能关闭自己的
@@ -227,7 +227,7 @@ func (w *countingResponseWriter) Flush() {
 func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hj, ok := w.ResponseWriter.(http.Hijacker)
 	if !ok {
-		return nil, nil, fmt.Errorf("ResponseWriter 不支持 Hijack: %T", w.ResponseWriter)
+		return nil, nil, fmt.Errorf("ResponseWriter does not support Hijack: %T", w.ResponseWriter)
 	}
 	conn, brw, err := hj.Hijack()
 	if err == nil && !w.reported {
@@ -439,7 +439,7 @@ func (s *corsProxySet) syncTo(svcs []configstore.Service) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return errors.New(i18n.T("err.proxySetClosed"))
+		return i18n.LErr("err.proxySetClosed")
 	}
 	var removed []*corsProxy
 	for id, p := range s.proxies {
@@ -462,7 +462,7 @@ func (s *corsProxySet) syncTo(svcs []configstore.Service) error {
 		}
 		p, err := newCORSProxy(s, svc.LocalHost, svc.LocalPort, svc.ID)
 		if err != nil {
-			return fmt.Errorf("%s: %w", i18n.T("err.svcProxyFail", svc.Name), err)
+			return i18n.LErrWrap("err.svcProxyFail", err, svc.Name)
 		}
 		s.add(svc.ID, p)
 		slog.Info("[代理] 新建 HTTP 本地代理（内置跨域+本地 Host）",

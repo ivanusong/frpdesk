@@ -265,6 +265,14 @@ body {
   justify-content: center;
 }
 
+/* 语言按钮：紧凑文本态（中/EN）替代图标，与同排图标按钮同尺寸同基线 */
+#btn-lang {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
 /* ghost 变体：无边框透明底（titlebar 内图标按钮），hover 浅底 */
 .btn-ghost {
   border-color: transparent;

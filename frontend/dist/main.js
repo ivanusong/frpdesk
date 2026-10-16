@@ -1,6 +1,6 @@
 // frpdesk 前端逻辑：纯原生 JS。bindings 调后端，Events 订阅推送。
 import * as api from "./bindings/frpdesk/index.js";
-import { t, applyPref, currentPref, currentLang, normalizePref, normalizeLang, readStoredPref, resolveLang } from "./i18n.js";
+import { t, tEn, applyPref, currentLang, normalizePref, normalizeLang, readStoredPref, resolveLang } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -220,12 +220,13 @@ function briefText(s, n) {
   return chars.length > n ? chars.slice(0, n).join("") + "…" : s;
 }
 
-// ---------- 语言（三态：system / zh-CN / en，localStorage + 后端 config.json 双持久化）----------
+// ---------- 语言（首启无偏好由 system 自动解析；按钮为中/EN 两态显式切换）----------
 
 // 语言偏好与主题同一模式：本地先应用（首帧正确），选择变化同步后端（托盘/后端消息语言）。
 // 后端 config.json + 快照的 resolved language 为权威：system 模式不做前端独立判定，
 // 统一采用后端探测结果，避免 WebView 与原生托盘语言不一致。
-const LANG_ORDER = ["system", "zh-CN", "en"];
+// 交互约定：首次/无偏好（system）自动跟随系统语言；语言按钮只在 zh-CN ⇄ en
+// 两个显式语言间切换并持久化，不会回到 system（后端 system 能力保留，快照对齐不变）。
 
 // langSync：语言写入串行/去重与确认状态。
 //   seq：用户每次改动的序号；链上任务执行前/结果返回后都校验，只有最新一次生效
@@ -238,19 +239,13 @@ const langSync = {
   confirmed: null,
 };
 
-// langDisplayName：语言按钮 tip 里的偏好展示名（system 附当前生效语言，
-// 即后端确认的 resolved，而非前端自行探测值）。
-function langDisplayName(pref) {
-  if (pref === "zh-CN") return t("lang.zh");
-  if (pref === "en") return t("lang.en");
-  return t("lang.systemResolved", t(currentLang() === "zh-CN" ? "lang.zh" : "lang.en"));
-}
-
-// renderLangButton：语言按钮 tip/aria 随当前偏好刷新
+// renderLangButton：语言按钮显示当前生效语言的紧凑可见状态（中/EN），
+// tip/aria 明确当前语言与点击后将切换到的语言
 function renderLangButton() {
   const btn = $("btn-lang");
   if (!btn) return;
-  btn.title = t("lang.title", langDisplayName(currentPref()));
+  btn.textContent = currentLang() === "zh-CN" ? "中" : "EN";
+  btn.title = t("lang.title");
   btn.setAttribute("aria-label", t("lang.aria"));
 }
 
@@ -443,10 +438,10 @@ function initTheme() {
     const cur = document.documentElement.dataset.theme ?? "system";
     applyTheme(order[(order.indexOf(cur) + 1) % order.length]);
   });
-  // 语言按钮：system → zh-CN → en 循环；切换即时生效并同步后端（托盘菜单同步切换）
+  // 语言按钮：中/EN 两态显式切换（按当前生效语言取反）；点击只持久化显式
+  // 偏好（zh-CN/en），不回到 system；首启未选择时仍由后端 system 权威解析
   $("btn-lang").addEventListener("click", () => {
-    const cur = currentPref();
-    setLanguagePref(LANG_ORDER[(LANG_ORDER.indexOf(cur) + 1) % LANG_ORDER.length]);
+    setLanguagePref(currentLang() === "zh-CN" ? "en" : "zh-CN");
   });
 }
 
@@ -479,7 +474,7 @@ function switchTab(name) {
   }
   if (name === "logs") {
     loadLogs().then(() => scrollLogToEnd(true)).catch(() => {});
-    run(t("run.loadProxyStatus"), () => api.AppService.ProxyStatuses())
+    run("run.loadProxyStatus", () => api.AppService.ProxyStatuses())
       .then((list) => {
         state.proxyStatus = Object.fromEntries(
           JSON.parse(JSON.stringify(list ?? [])).map((x) => [x.serviceId, x]),
@@ -720,8 +715,9 @@ function renderLogs() {
   view.innerHTML = state.logs
     .map(
       (e) =>
-        // 归属标注：LogEntry 带服务器信息则标名称，公共/旧字段标「系统」（向后兼容）
-        `<div class="log-line ${e.level}"><span class="log-time">${esc(e.timestamp)}</span><span class="log-srv">[${esc(e.serverName || t("log.system"))}]</span>${esc(e.message)}</div>`,
+        // 归属标注：LogEntry 带服务器信息则标名称；公共/旧字段固定标 System
+        // （日志内容与归属标注均不随界面语言翻译）
+        `<div class="log-line ${e.level}"><span class="log-time">${esc(e.timestamp)}</span><span class="log-srv">[${esc(e.serverName || "System")}]</span>${esc(e.message)}</div>`,
     )
     .join("");
 }
@@ -794,25 +790,26 @@ function applyConfigOnly(snapshot) {
 
 // ---------- 后端调用 ----------
 
-async function run(label, fn) {
+async function run(key, fn) {
   try {
     return await fn();
   } catch (err) {
-    const msg = t("run.fail", label, err.message ?? err);
+    // toast 走当前语言（双语）；诊断日志通道固定英文（不随界面语言翻译）
+    const msg = t("run.fail", t(key), err.message ?? err);
     toast("error", msg);
     try {
-      await api.AppService.FrontendLog("error", msg);
+      await api.AppService.FrontendLog("error", tEn("run.fail", tEn(key), err.message ?? err));
     } catch {}
     throw err;
   }
 }
 
 async function refreshAll() {
-  applySnapshot(await run(t("run.loadConfig"), () => api.AppService.Snapshot()));
+  applySnapshot(await run("run.loadConfig", () => api.AppService.Snapshot()));
 }
 
 async function loadLogs() {
-  const logs = await run(t("run.loadLogs"), () => api.AppService.Logs());
+  const logs = await run("run.loadLogs", () => api.AppService.Logs());
   mergeLogs(logs); // 合并而非覆盖：拉取窗口内事件先到的更晚日志不丢
   renderLogs();
 }
@@ -901,7 +898,7 @@ async function refreshStats() {
     if (!state.stats.errLogged) {
       state.stats.errLogged = true;
       try {
-        await api.AppService.FrontendLog("error", t("stats.fetchFailLog", state.stats.error));
+        await api.AppService.FrontendLog("error", tEn("stats.fetchFailLog", state.stats.error));
       } catch {}
     }
     renderStatsError();
@@ -1784,7 +1781,7 @@ async function openQrModal(url) {
   }
   box.innerHTML = `<span class="qr-loading">${esc(t("qr.loading"))}</span>`;
   try {
-    const dataUrl = await run(t("run.genQr"), () => api.AppService.QRCode(url));
+    const dataUrl = await run("run.genQr", () => api.AppService.QRCode(url));
     qrCache.set(url, dataUrl);
     // 迟到回填防串台：弹窗仍开着且展示的就是这个地址才写入
     if (!modal.hidden && $("qr-url").textContent === url) {
@@ -1864,7 +1861,7 @@ async function fetchInitUpdateInfo() {
   const info = await tryFetch("UpdateInfo", () => api.AppService.UpdateInfo(), 2);
   if (state.update.seq !== seqBefore) {
     try {
-      await api.AppService.FrontendLog("info", "UpdateInfo 拉取返回时已有 app:update 事件先到，丢弃迟到响应");
+      await api.AppService.FrontendLog("info", "UpdateInfo fetch resolved after an app:update event arrived; discarding the stale response");
     } catch {}
     return;
   }
@@ -2140,8 +2137,8 @@ function bindEvents() {
     try {
       const wasEditing = Boolean(state.serverEditingId);
       const snapshot = wasEditing
-        ? await run(t("run.saveConfig"), () => api.AppService.UpdateServer(state.serverEditingId, input))
-        : await run(t("run.createConfig"), () => api.AppService.CreateServer(input));
+        ? await run("run.saveConfig", () => api.AppService.UpdateServer(state.serverEditingId, input))
+        : await run("run.createConfig", () => api.AppService.CreateServer(input));
       closeServerModal();
       applyConfigOnly(snapshot);
       toast("success", wasEditing ? t("toast.configUpdated") : t("toast.configAdded"));
@@ -2208,8 +2205,8 @@ function bindEvents() {
     };
     try {
       const snapshot = wasEditing
-        ? await run(t("run.saveService"), () => api.AppService.UpdateService(state.editingId, input))
-        : await run(t("run.createService"), () => api.AppService.CreateService(input));
+        ? await run("run.saveService", () => api.AppService.UpdateService(state.editingId, input))
+        : await run("run.createService", () => api.AppService.CreateService(input));
       setLastServer(type, serverId); // 记住本次选择供下次新建（按类型分键：http/tcp/udp）
       closeServiceModal();
       applyConfigOnly(snapshot);
@@ -2364,7 +2361,7 @@ function onServiceListClick(e) {
   } else if (btn.dataset.act === "delete") {
     askConfirm(t("confirm.deleteService", svc.name)).then((ok) => {
       if (!ok) return;
-      run(t("run.deleteService"), () => api.AppService.DeleteService(id))
+      run("run.deleteService", () => api.AppService.DeleteService(id))
         .then(applyConfigOnly)
         .then(() => toast("success", t("toast.serviceDeleted")))
         .catch(() => {});
@@ -2377,7 +2374,7 @@ function onServiceListToggle(e) {
   if (!toggle) return;
   const id = toggle.closest(".service-item").dataset.id;
   state.listRenderHoldUntil = Date.now() + 600; // 动画保护窗：期间 app:snapshot 不重建卡列表
-  run(t("run.toggleService"), () => api.AppService.SetServiceEnabled(id, toggle.checked))
+  run("run.toggleService", () => api.AppService.SetServiceEnabled(id, toggle.checked))
     .then((snapshot) => {
       // 轻量更新：只改该服务的 enabled + 刷新计数等轻量部位；
       // 不整卡重绘（renderServices 会重建 switch，160ms 位移动画被截断）
@@ -2410,7 +2407,7 @@ function onServerListClick(e) {
     if (state.serverProbe[id]) return;
     state.serverProbe[id] = true;
     renderServers();
-    run(t("run.testConn"), () => api.AppService.TestServerConnection(id))
+    run("run.testConn", () => api.AppService.TestServerConnection(id))
       .then((res) => {
         if (res?.success) {
           // 明确是控制连接/鉴权成功；core 附带的 message 仅短附，避免长 toast
@@ -2432,7 +2429,7 @@ function onServerListClick(e) {
   } else if (btn.dataset.act === "srv-delete") {
     askConfirm(t("confirm.deleteServer", srv.name)).then((ok) => {
       if (!ok) return;
-      run(t("run.deleteConfig"), () => api.AppService.DeleteServer(id))
+      run("run.deleteConfig", () => api.AppService.DeleteServer(id))
         .then(applyConfigOnly)
         .then(() => toast("success", t("toast.configDeleted")))
         .catch(() => {}); // 失败原因已 toast（后端消息原样呈现）
@@ -2447,7 +2444,7 @@ async function boot() {
   initTheme();
   bindEvents();
   try {
-    await api.AppService.FrontendLog("info", `boot 开始 t=${Date.now()}`);
+    await api.AppService.FrontendLog("info", `boot start t=${Date.now()}`);
   } catch {}
   // 初始拉取带重试：页面加载早期的绑定调用可能失败（响应丢失），指数退避重试兜底
   // （tryFetch 已提升为模块级，供更新信息拉取复用）。
@@ -2480,7 +2477,7 @@ async function boot() {
   // 更新信息：事件先到则丢弃迟到响应；失败不阻塞首屏（后端日志可查）
   fetchInitUpdateInfo().catch(() => {});
   try {
-    await api.AppService.FrontendLog("info", `boot 完成 logs=${state.logs.length} snapshot=${state.snapshot ? "ok" : "null"}`);
+    await api.AppService.FrontendLog("info", `boot done logs=${state.logs.length} snapshot=${state.snapshot ? "ok" : "null"}`);
   } catch {}
 }
 
@@ -2499,7 +2496,7 @@ const tryFetch = async (label, fn, attempts) => {
     } catch (err) {
       lastErr = err;
       try {
-        await api.AppService.FrontendLog("error", `${label} #${i + 1} 失败：${err.message ?? err}`);
+        await api.AppService.FrontendLog("error", `${label} #${i + 1} failed: ${err.message ?? err}`);
       } catch {}
       await sleep(400 * (i + 1));
     }
