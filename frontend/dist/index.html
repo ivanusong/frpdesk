@@ -215,7 +215,12 @@
           </div>
           <div class="form-row">
             <label>
-              <span data-i18n="form.localIP">本地 IP</span>
+              <span class="field-head">
+                <span class="field-title" data-i18n="form.localIP">本地 IP</span>
+                <button type="button" class="field-help" data-help="form.localIPHelp" data-i18n-aria="form.localIPHelpAria">
+                  <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                </button>
+              </span>
               <input name="localHost" type="text" value="127.0.0.1" autocomplete="off" />
             </label>
             <label>
@@ -284,6 +289,7 @@
           <label>
             <span class="field-head">
               <span class="field-title" data-i18n="srvForm.authToken">authToken</span>
+              <span class="field-badge" data-i18n="srvForm.authTokenBadge">可选</span>
               <button type="button" class="field-help" data-help="srvForm.authTokenHelp" data-i18n-aria="srvForm.authTokenHelpAria">
                 <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
               </button>
@@ -312,7 +318,12 @@
               </label>
               <div class="form-row">
                 <label>
-                  <span data-i18n="srvForm.scheme">访问协议</span>
+                  <span class="field-head">
+                    <span class="field-title" data-i18n="srvForm.scheme">访问协议</span>
+                    <button type="button" class="field-help" data-help="srvForm.schemeHelp" data-i18n-aria="srvForm.schemeHelpAria">
+                      <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                    </button>
+                  </span>
                   <div class="select-wrap">
                     <select name="scheme">
                       <option value="https" selected>https</option>

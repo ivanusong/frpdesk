@@ -203,31 +203,37 @@ check(
     !readmeZh.includes("verify-i18n"),
 );
 
-// ---------- 10) 表单小问号帮助：短标题 + 帮助 key ----------
+// ---------- 10) 表单小问号帮助：短标题 + 帮助 key + 文案深度 ----------
 // 长解释从小问号入口（data-help）延迟展示：主 label 必须是短标题（不含括号/长解释），
-// 每个帮助 key 都必须存在且与短标题不同；旧的 HTTP 开关常驻 hint 行与 key 必须移除。
+// 可选性用可见短标记（badge）表达；每个帮助 key 都必须存在且与短标题不同；
+// HTTP/根域名/访问协议/本地 IP 帮助必须覆盖服务端配置、DNS、反向代理/网关等关键语义；
+// 旧的 HTTP 开关常驻 hint 行与 key 必须移除。
 const helpKeys = [...html.matchAll(/data-help="([^"]+)"/g)].map((m) => m[1]);
 const helpAriaKeys = [...html.matchAll(/data-i18n-aria="([^"]*HelpAria)"/g)].map((m) => m[1]);
 const SHORT_TITLES = [
+  ["form.localIP", "本地 IP", "Local IP"],
   ["form.subdomain", "子域名前缀", "Subdomain prefix"],
   ["form.remotePort", "远程端口", "Remote port"],
   ["srvForm.authToken", "authToken", "authToken"],
   ["srvForm.baseDomain", "根域名", "Base domain"],
+  ["srvForm.scheme", "访问协议", "Access scheme"],
   ["srvForm.publicPort", "访问端口", "Access port"],
   ["srvForm.httpToggle", "支持 HTTP 域名", "HTTP domains"],
 ];
 const HELP_TARGETS = [
+  ["form.localIP", "form.localIPHelp"],
   ["form.subdomain", "form.subdomainHelp"],
   ["form.remotePort", "form.remotePortHelp"],
   ["srvForm.authToken", "srvForm.authTokenHelp"],
   ["srvForm.baseDomain", "srvForm.baseDomainHelp"],
+  ["srvForm.scheme", "srvForm.schemeHelp"],
   ["srvForm.publicPort", "srvForm.publicPortHelp"],
   ["srvForm.httpToggle", "srvForm.httpToggleHelp"],
 ];
 check(
   `小问号入口齐备（${helpKeys.length} 个 data-help / ${helpAriaKeys.length} 个 aria 均进词典）`,
-  helpKeys.length === 6 &&
-    helpAriaKeys.length === 6 &&
+  helpKeys.length === 8 &&
+    helpAriaKeys.length === 8 &&
     helpKeys.every((k) => k in DICT) &&
     helpAriaKeys.every((k) => k in DICT) &&
     HELP_TARGETS.every(([, h]) => helpKeys.includes(h)),
@@ -247,6 +253,70 @@ check(
     return Boolean(h?.zh?.trim()) && Boolean(h?.en?.trim()) && h.zh !== DICT[titleKey].zh && h.en !== DICT[titleKey].en;
   }),
   HELP_TARGETS.map(([, h]) => h).join(","),
+);
+check(
+  "authToken：可见位置有独立轻量「可选」标记（不是长括号文案）",
+  DICT["srvForm.authTokenBadge"]?.zh === "可选" &&
+    DICT["srvForm.authTokenBadge"]?.en === "Optional" &&
+    !/[（(]/.test(DICT["srvForm.authTokenBadge"].zh) &&
+    html.includes('class="field-badge"') &&
+    html.includes('data-i18n="srvForm.authTokenBadge"') &&
+    html.indexOf('data-i18n="srvForm.authTokenBadge"') < html.indexOf('data-help="srvForm.authTokenHelp"'),
+  `badge=${DICT["srvForm.authTokenBadge"]?.zh}/${DICT["srvForm.authTokenBadge"]?.en}`,
+);
+const zhHelp = (k) => DICT[k].zh;
+const enHelp = (k) => DICT[k].en;
+check(
+  "authToken 帮助：说明控制连接鉴权与可留空条件",
+  zhHelp("srvForm.authTokenHelp").includes("控制连接") &&
+    zhHelp("srvForm.authTokenHelp").includes("鉴权") &&
+    zhHelp("srvForm.authTokenHelp").includes("可留空") &&
+    enHelp("srvForm.authTokenHelp").includes("control connection") &&
+    enHelp("srvForm.authTokenHelp").includes("leave empty"),
+  zhHelp("srvForm.authTokenHelp"),
+);
+check(
+  "HTTP domains 帮助：frps.toml 可执行配置（vhostHTTPPort/subDomainHost/放行/重启）+ 不自动改服务端",
+  ["frps.toml", "vhostHTTPPort", "subDomainHost", "*.example.com", "放行", "重启", "不会自动修改服务端", "根域名", "访问协议", "端口"].every(
+    (s) => zhHelp("srvForm.httpToggleHelp").includes(s),
+  ) &&
+    ["frps.toml", "vhostHTTPPort", "subDomainHost", "*.example.com", "restart", "base domain", "access scheme", "port"].every((s) =>
+      enHelp("srvForm.httpToggleHelp").includes(s),
+    ),
+  zhHelp("srvForm.httpToggleHelp"),
+);
+check(
+  "Base domain 帮助：*.example.com DNS + 不带 * + 与 subDomainHost 一致 + blog.example.com 入口",
+  ["*.example.com", "不带", "subDomainHost", "vhostHTTPPort", "blog.example.com"].every((s) => zhHelp("srvForm.baseDomainHelp").includes(s)) &&
+    ["*.example.com", "without", "subDomainHost", "vhostHTTPPort", "blog.example.com"].every((s) =>
+      enHelp("srvForm.baseDomainHelp").includes(s),
+    ),
+  zhHelp("srvForm.baseDomainHelp"),
+);
+check(
+  "Access scheme 帮助：只描述对外 URL、不为 Frps 开 TLS；直连 http + 反代网关按公开入口",
+  ["不会为 Frps 开启 TLS", "vhostHTTPSPort", "vhostHTTPPort", "http", "反向代理", "网关", "公开入口"].every((s) =>
+    zhHelp("srvForm.schemeHelp").includes(s),
+  ) &&
+    ["reverse proxy", "gateway", "TLS", "vhostHTTPPort", "public entry"].every((s) => enHelp("srvForm.schemeHelp").includes(s)),
+  zhHelp("srvForm.schemeHelp"),
+);
+check(
+  "双语均覆盖关键配置语义（*.example.com / vhostHTTPPort / subDomainHost）",
+  ["*.example.com", "vhostHTTPPort", "subDomainHost"].every((tk) =>
+    [zhHelp("srvForm.httpToggleHelp"), zhHelp("srvForm.baseDomainHelp"), zhHelp("srvForm.schemeHelp")].join(" ").includes(tk),
+  ) &&
+    ["*.example.com", "vhostHTTPPort", "subDomainHost"].every((tk) =>
+      [enHelp("srvForm.httpToggleHelp"), enHelp("srvForm.baseDomainHelp"), enHelp("srvForm.schemeHelp")].join(" ").includes(tk),
+    ),
+  [zhHelp("srvForm.httpToggleHelp"), zhHelp("srvForm.baseDomainHelp"), zhHelp("srvForm.schemeHelp")].join(" | "),
+);
+check(
+  "Local IP 帮助：本机 IP 与同内网其他设备均可填 + frpc 转发语义",
+  ["本机 IP", "内网", "frpc"].every((s) => zhHelp("form.localIPHelp").includes(s)) &&
+    enHelp("form.localIPHelp").includes("LAN") &&
+    enHelp("form.localIPHelp").includes("frpc"),
+  zhHelp("form.localIPHelp"),
 );
 check(
   "HTTP 开关常驻 hint 行与旧 key 已移除（说明改由小问号承载）",
