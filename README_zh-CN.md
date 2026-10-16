@@ -30,14 +30,14 @@ node scripts/verify-multiserver-ui.mjs   # 多 Frps UI 行为验证
 
 ## 发布
 
-推送 **annotated** 的 `vX.Y.Z` tag，版本号必须同时与 `VERSION` 和 [CHANGELOG.md](CHANGELOG.md) 最新的 `## X.Y.Z` 小节一致。
-发布日志的唯一来源是 tag 描述：[Release workflow](.github/workflows/release.yml) 用它（含 subject 与 body 时取 body）生成 GitHub Release 描述与 Wails updater `stable.json` 的 notes（即应用内更新提示），随后运行测试、构建 macOS 与 Windows 产物并整体发布为 GitHub Release；轻量 tag 或描述为空会在发布前失败。
-
-[CHANGELOG.md](CHANGELOG.md) 仍需随版本维护并参与版本一致性校验，但不再作为发布日志来源。
+推送 **annotated** 的 `vX.Y.Z` tag，版本号与 `VERSION` 一致即可。tag 描述就是发布说明，无需维护 changelog 文件：[Release workflow](.github/workflows/release.yml) 用它（含 subject 与 body 时取 body）生成 GitHub Release 描述与 Wails updater `stable.json` 的 notes（即应用内更新提示），随后运行测试、构建 macOS 与 Windows 产物并整体发布为 GitHub Release；轻量 tag 或描述为空会在发布前失败。
 
 ```bash
-git tag -a vX.Y.Z -F notes.md   # notes.md 即 GitHub Release / 应用内更新提示
-git push origin vX.Y.Z
+git tag -a v0.3.0 -m "frpdesk v0.3.0
+
+- 本次改动要点
+- 几行即可"
+git push origin v0.3.0
 ```
 
 发行版在 `https://github.com/ivanusong/frpdesk/releases/latest/download/stable.json` 检查更新。

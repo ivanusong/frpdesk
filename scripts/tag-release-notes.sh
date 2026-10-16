@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # tag-release-notes.sh —— 从 annotated tag 的描述生成 release-notes.md。
 #
-# 发布日志的唯一来源是 annotated tag 的 message（不再从 CHANGELOG.md 摘取；
-# CHANGELOG 仅保留版本历史与发布一致性校验用途）。提取规则：
+# 发布日志的唯一来源是 annotated tag 的 message（tag 描述即发布说明，无需另建文件）。提取规则：
 #   1. tag 必须是 annotated（轻量 tag 直接失败，提示用 git tag -a 创建）；
 #   2. message 含 subject 与 body 时优先取 body（以首个空行分隔），body 为空时回退
 #      subject；纯多行列表（无空行）整段保留；
@@ -23,12 +22,12 @@ die() { echo "[tag-notes] $*" >&2; exit 1; }
 [ -n "$TAG" ] || die "缺少 tag：请设置 GITHUB_REF_NAME 或传入 tag，例如 scripts/tag-release-notes.sh v0.2.12"
 
 if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
-    die "当前仓库不存在 tag ${TAG}；发布需先创建 annotated tag：git tag -a ${TAG} -F <notes-file>"
+    die "当前仓库不存在 tag ${TAG}；发布需先创建 annotated tag：git tag -a ${TAG} -m \"<发布说明>\""
 fi
 
 object_type="$(git cat-file -t "refs/tags/${TAG}")"
 if [ "$object_type" != "tag" ]; then
-    die "tag ${TAG} 不是 annotated tag（objecttype=${object_type}）；请用 git tag -a ${TAG} -F <notes-file> 创建带描述的 annotated tag"
+    die "tag ${TAG} 不是 annotated tag（objecttype=${object_type}）；请用 git tag -a ${TAG} -m \"<发布说明>\" 创建带描述的 annotated tag"
 fi
 
 # %(contents) 为完整 tag message（不含 tag 头与签名），多行原样保留
@@ -61,7 +60,7 @@ notes="$(
     '
 )"
 
-[ -n "$notes" ] || die "tag ${TAG} 的描述为空；请用 git tag -a ${TAG} -F <notes-file> 写入发布日志（见 CHANGELOG.md 版本节）"
+[ -n "$notes" ] || die "tag ${TAG} 的描述为空；请用 git tag -a ${TAG} -m \"<发布说明>\"（或 -F <notes-file>）写入发布日志"
 
 if [ "$OUTPUT" = "-" ]; then
     printf '%s\n' "$notes"

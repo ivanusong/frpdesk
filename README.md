@@ -30,21 +30,20 @@ node scripts/verify-multiserver-ui.mjs   # multi-FRPS UI behavior
 
 ## Release
 
-Push an **annotated** `vX.Y.Z` tag. Its version must match both `VERSION` and the
-newest `## X.Y.Z` section of [CHANGELOG.md](CHANGELOG.md); the
-tag message is the single source of the release notes. The
-[Release workflow](.github/workflows/release.yml) uses it (the body when the message
+Push an **annotated** `vX.Y.Z` tag whose version matches `VERSION`. The tag message
+is the release notes — there is no changelog file to maintain. The
+[Release workflow](.github/workflows/release.yml) uses the message (the body when it
 has a subject and a body) for both the GitHub Release description and the Wails
 updater `stable.json` notes shown in-app, then runs the tests, builds the macOS and
 Windows artifacts, and publishes everything as a GitHub Release. A lightweight tag
 or an empty message fails the release before anything is published.
 
-CHANGELOG.md is still maintained for every release and checked for version
-consistency, but it no longer feeds the release notes.
-
 ```bash
-git tag -a vX.Y.Z -F notes.md   # notes.md becomes the release / in-app update notes
-git push origin vX.Y.Z
+git tag -a v0.3.0 -m "frpdesk v0.3.0
+
+- What changed in this release
+- A few lines are enough"
+git push origin v0.3.0
 ```
 
 Shipped builds check for updates against the GitHub Release `stable.json` of the

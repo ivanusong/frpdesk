@@ -1,4 +1,4 @@
-# 发布工作流：推送 annotated 的 v x.y.z tag 触发。严格校验 tag 与 VERSION、CHANGELOG 最新节完全一致，
+# 发布工作流：推送 annotated 的 v x.y.z tag 触发。严格校验 tag 与 VERSION 完全一致，
 # 发布日志（GitHub Release 描述与 updater stable.json notes）取自 annotated tag 的描述
 # （scripts/tag-release-notes.sh，轻量 tag 或描述为空直接失败），
 # 然后复用 build.sh 构建三目标产物，生成 Wails updater stable.json，并以 GitHub Release 发布。
@@ -25,7 +25,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 校验版本一致性（tag / VERSION / CHANGELOG 最新节）
+      - name: 校验版本一致性（tag / VERSION）
         run: |
           set -euo pipefail
           tag_version="${GITHUB_REF_NAME#v}"
@@ -37,16 +37,6 @@ jobs:
           file_version="$(tr -d '[:space:]' < VERSION)"
           if [ "$tag_version" != "$file_version" ]; then
             echo "[release] tag 版本 ${tag_version} ≠ VERSION ${file_version}" >&2
-            exit 1
-          fi
-
-          changelog_version="$(grep -m1 -E '^## [0-9]+\.[0-9]+\.[0-9]+$' CHANGELOG.md | sed -E 's/^## //' || true)"
-          if [ -z "$changelog_version" ]; then
-            echo "[release] CHANGELOG.md 未找到三段版本号节" >&2
-            exit 1
-          fi
-          if [ "$tag_version" != "$changelog_version" ]; then
-            echo "[release] tag 版本 ${tag_version} ≠ CHANGELOG 最新节 ${changelog_version}" >&2
             exit 1
           fi
 

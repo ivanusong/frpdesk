@@ -10,5 +10,5 @@
 
 - [ ] 已运行 `go test ./...`
 - [ ] 涉及前端改动时已运行 `node scripts/verify-multiserver-ui.mjs`
-- [ ] 文档 / CHANGELOG 已按需更新
+- [ ] 文档已按需更新
 - [ ] 改动聚焦，未混入无关格式化
