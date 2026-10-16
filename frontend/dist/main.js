@@ -1,5 +1,6 @@
 // frpdesk 前端逻辑：纯原生 JS。bindings 调后端，Events 订阅推送。
 import * as api from "./bindings/frpdesk/index.js";
+import { t, applyPref, currentPref, currentLang, normalizePref, normalizeLang, readStoredPref, resolveLang } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,15 +21,22 @@ const state = {
   updateChecking: false, // 手动检查更新忙态（防重复点击）
   updateConfirming: false, // 确认弹窗期间防双击多弹窗
   updateApplying: false, // InstallUpdate RPC 挂起期间防重复触发（同步等待下载+重启，持续到真实完成）
+  modalCtx: null, // 服务/配置模态打开上下文（语言切换时重算动态标题）
 };
 
+// 状态展示文案 key（稳定语义 key，渲染时按当前语言取词；未知状态原样展示）
 const STATE_LABELS = {
-  stopped: "未启动",
-  starting: "正在登录 frps",
-  stopping: "停止中",
-  running: "已连接",
-  failed: "失败",
+  stopped: "state.stopped",
+  starting: "state.starting",
+  stopping: "state.stopping",
+  running: "state.running",
+  failed: "state.failed",
 };
+
+// stateLabel：状态 key → 当前语言文案（未知状态用原始键）
+function stateLabel(st) {
+  return STATE_LABELS[st] ? t(STATE_LABELS[st]) : st;
+}
 
 // lucide 内联图标（ISC；Feather 派生图标另受 MIT 许可，详见 THIRD_PARTY_NOTICES.md / licenses/）：16px / stroke 1.75 / currentColor / fill none
 const ICONS = {
@@ -212,6 +220,147 @@ function briefText(s, n) {
   return chars.length > n ? chars.slice(0, n).join("") + "…" : s;
 }
 
+// ---------- 语言（三态：system / zh-CN / en，localStorage + 后端 config.json 双持久化）----------
+
+// 语言偏好与主题同一模式：本地先应用（首帧正确），选择变化同步后端（托盘/后端消息语言）。
+// 后端 config.json + 快照的 resolved language 为权威：system 模式不做前端独立判定，
+// 统一采用后端探测结果，避免 WebView 与原生托盘语言不一致。
+const LANG_ORDER = ["system", "zh-CN", "en"];
+
+// langSync：语言写入串行/去重与确认状态。
+//   seq：用户每次改动的序号；链上任务执行前/结果返回后都校验，只有最新一次生效
+//        （快速连点只落最后一次，迟到响应丢弃，不覆盖新选择）；
+//   chain：写入串行链（同一时刻至多一个 SetLanguage 在途）；
+//   confirmed：最近一次后端确认一致的 { pref, resolved }（失败回滚基准）。
+const langSync = {
+  seq: 0,
+  chain: Promise.resolve(),
+  confirmed: null,
+};
+
+// langDisplayName：语言按钮 tip 里的偏好展示名（system 附当前生效语言，
+// 即后端确认的 resolved，而非前端自行探测值）。
+function langDisplayName(pref) {
+  if (pref === "zh-CN") return t("lang.zh");
+  if (pref === "en") return t("lang.en");
+  return t("lang.systemResolved", t(currentLang() === "zh-CN" ? "lang.zh" : "lang.en"));
+}
+
+// renderLangButton：语言按钮 tip/aria 随当前偏好刷新
+function renderLangButton() {
+  const btn = $("btn-lang");
+  if (!btn) return;
+  btn.title = t("lang.title", langDisplayName(currentPref()));
+  btn.setAttribute("aria-label", t("lang.aria"));
+}
+
+// applyStaticI18n：静态 data 属性文案（text/title/aria-label/placeholder）
+function applyStaticI18n() {
+  for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll("[data-i18n-title]")) el.title = t(el.dataset.i18nTitle);
+  for (const el of document.querySelectorAll("[data-i18n-aria]")) el.setAttribute("aria-label", t(el.dataset.i18nAria));
+  for (const el of document.querySelectorAll("[data-i18n-placeholder]")) el.placeholder = t(el.dataset.i18nPlaceholder);
+}
+
+// refreshOpenModalI18n：模态打开期间切语言时重算动态文案（不丢表单输入与目标选择）：
+// 标题（协议以实际表单值为准，编辑 TCP→UDP 后标题随新协议）、目标 Frps 下拉
+// （空状态/「（当前）」后缀）、迁移提示（地址预览/短暂中断）。
+function refreshOpenModalI18n() {
+  const ctx = state.modalCtx;
+  if (!ctx) return;
+  if (ctx.kind === "service" && !$("service-modal").hidden) {
+    const type = $("service-form").elements.type.value || ctx.type;
+    ctx.type = type;
+    $("modal-title").textContent = ctx.editing
+      ? t("modal.editService", svcTypeLabel(type))
+      : type === "http"
+        ? t("action.addHttp")
+        : t("action.addPort");
+    syncServerSelect(type, true); // preserve：原样保留已选目标（含未选择），只刷新文案
+    updateMoveHint();
+  } else if (ctx.kind === "server" && !$("server-modal").hidden) {
+    $("server-modal-title").textContent = ctx.editing ? t("modal.editServer") : t("modal.addServer");
+  }
+}
+
+// applyLanguage：语言变化后的整体重绘（纯渲染，不触发任何后端业务调用）。
+// 覆盖静态文案、主题/语言按钮、状态栏、列表卡片、日志标注、统计、更新区与
+// 打开中的模态动态文案，全部从内存/已有状态重渲染，不丢用户数据、不重启隧道。
+function applyLanguage() {
+  applyStaticI18n();
+  applyTheme(document.documentElement.dataset.theme ?? "system", false);
+  renderLangButton();
+  if (state.snapshot) {
+    renderSnapshot(state.snapshot);
+  }
+  renderLogs();
+  if (state.stats.data) renderStats();
+  else if (state.stats.error) renderStatsError();
+  renderUpdate();
+  renderCheckButton();
+  refreshOpenModalI18n();
+}
+
+// initLanguage：首帧应用本地缓存偏好（只读；resolved 待快照/绑定返回后以后端为准）。
+function initLanguage() {
+  applyPref(readStoredPref(), { persist: false });
+  applyStaticI18n();
+  renderLangButton();
+}
+
+// reconcileLanguageFromSnapshot：启动快照对齐（后端权威）。
+// - 拉取期间用户已改语言（seq 已推进）→ 不覆盖本地意图，返回 false；
+// - 快照 config.language 缺失/非法 → 按 system 权威对齐（不信本地残留）；
+// - 快照顶层 language（后端 resolved）合法则直接采用，否则回退本地系统解析（旧后端）。
+// 成功对齐会持久化并记为「已确认一致」状态，返回 true。
+function reconcileLanguageFromSnapshot(snap, seqAtRequest) {
+  if (seqAtRequest !== langSync.seq) return false;
+  const pref = normalizePref(snap?.config?.language);
+  const resolved = normalizeLang(snap?.language);
+  langSync.confirmed = { pref, resolved: resolved ?? resolveLang(pref) };
+  applyPref(pref, { persist: true, resolved });
+  applyLanguage();
+  return true;
+}
+
+// setLanguagePref：切换偏好（后端确认后持久化）并即时重绘。返回串行链任务 Promise。
+// 流程：本地即时反馈（system 先用本地解析）→ 串行发送 SetLanguage → 以后端返回的
+// resolved 修正 UI 并持久化；失败则回滚到最近确认一致状态并可见提示。
+// 链上任务执行前/结果返回后都校验 seq：快速连点只落最后一次，迟到结果一律丢弃。
+function setLanguagePref(pref) {
+  const p = normalizePref(pref);
+  const seq = ++langSync.seq;
+  applyPref(p, { persist: false }); // 本地即时反馈；持久化等后端确认，避免失败后长期不一致
+  applyLanguage();
+  const run = async () => {
+    if (seq !== langSync.seq) return null; // 已有更新的点击：本次作废（去重）
+    try {
+      const res = await api.AppService.SetLanguage(p);
+      const rPref = normalizePref(res?.preference ?? p);
+      const rLang = normalizeLang(res?.resolved) ?? resolveLang(rPref);
+      if (seq !== langSync.seq) return null; // 迟到结果：丢弃，不覆盖新选择
+      langSync.confirmed = { pref: rPref, resolved: rLang };
+      applyPref(rPref, { persist: true, resolved: rLang });
+      applyLanguage();
+      return { pref: rPref, resolved: rLang };
+    } catch (err) {
+      if (seq !== langSync.seq) return null; // 已被更新点击取代：不回滚、不提示
+      // 持久化失败：回滚到最近确认一致状态（localStorage 只在成功后写入，未被污染）
+      const fb = langSync.confirmed ?? { pref: readStoredPref(), resolved: null };
+      applyPref(fb.pref, { persist: false, resolved: fb.resolved });
+      applyLanguage();
+      const msg = t("lang.syncFail", err?.message ?? err);
+      toast("error", msg);
+      try {
+        await api.AppService.FrontendLog("error", msg);
+      } catch {}
+      return null;
+    }
+  };
+  langSync.chain = langSync.chain.then(run, run);
+  return langSync.chain;
+}
+
 // ---------- Toast（顶部居中堆叠；info/success 3s、error 5s；同屏最多 3 条旧的先走）----------
 
 const TOAST_DURATION = { info: 3000, success: 3000, error: 5000 };
@@ -248,12 +397,13 @@ function dismissToast(el) {
 
 const THEME_KEY = "frpdesk.theme";
 const THEME_META = {
-  system: { label: "跟随系统", icon: ICONS.monitor },
-  light: { label: "浅色", icon: ICONS.sun },
-  dark: { label: "深色", icon: ICONS.moon },
+  system: { labelKey: "theme.system", icon: ICONS.monitor },
+  light: { labelKey: "theme.light", icon: ICONS.sun },
+  dark: { labelKey: "theme.dark", icon: ICONS.moon },
 };
 
-function applyTheme(mode) {
+// applyTheme：应用主题并刷新按钮（persist=false 用于语言切换时的纯重绘，不重复写存储）
+function applyTheme(mode, persist = true) {
   const root = document.documentElement;
   if (mode === "system") {
     delete root.dataset.theme;
@@ -262,9 +412,10 @@ function applyTheme(mode) {
   }
   const btn = $("btn-theme");
   btn.dataset.mode = mode;
-  btn.title = `主题：${THEME_META[mode].label}`;
-  btn.setAttribute("aria-label", btn.title);
+  btn.title = t("theme.title", t(THEME_META[mode].labelKey));
+  btn.setAttribute("aria-label", t("theme.aria"));
   btn.innerHTML = THEME_META[mode].icon;
+  if (!persist) return;
   try {
     localStorage.setItem(THEME_KEY, mode);
   } catch {
@@ -291,6 +442,11 @@ function initTheme() {
     const order = ["system", "light", "dark"];
     const cur = document.documentElement.dataset.theme ?? "system";
     applyTheme(order[(order.indexOf(cur) + 1) % order.length]);
+  });
+  // 语言按钮：system → zh-CN → en 循环；切换即时生效并同步后端（托盘菜单同步切换）
+  $("btn-lang").addEventListener("click", () => {
+    const cur = currentPref();
+    setLanguagePref(LANG_ORDER[(LANG_ORDER.indexOf(cur) + 1) % LANG_ORDER.length]);
   });
 }
 
@@ -323,7 +479,7 @@ function switchTab(name) {
   }
   if (name === "logs") {
     loadLogs().then(() => scrollLogToEnd(true)).catch(() => {});
-    run("加载代理状态", () => api.AppService.ProxyStatuses())
+    run(t("run.loadProxyStatus"), () => api.AppService.ProxyStatuses())
       .then((list) => {
         state.proxyStatus = Object.fromEntries(
           JSON.parse(JSON.stringify(list ?? [])).map((x) => [x.serviceId, x]),
@@ -382,21 +538,21 @@ function setStartedAt(startedAt) {
   }
   const start = new Date(startedAt).getTime();
   const tick = () => {
-    el.textContent = `已启动: ${fmtDuration(Date.now() - start)}`;
+    el.textContent = t("status.startedFor", fmtDuration(Date.now() - start));
   };
   tick();
   startedTimer = setInterval(tick, 1000);
 }
 
 function renderStatus(status) {
-  const label = STATE_LABELS[status.state] ?? status.state;
+  const label = stateLabel(status.state);
   $("status-dot").className = `dot dot--${status.state}`;
   $("status-label").textContent = label;
   // 小字与主标签同文案时（如 running「已连接」）不重复展示
   let message = status.message === label ? "" : status.message ?? "";
   // running 下逐服务注册失败：底部栏提示 N 个服务注册失败（连接态不变，不关其他代理）
   if (status.state === "running" && failedProxyCount() > 0) {
-    message = `${failedProxyCount()} 个服务注册失败`;
+    message = t("status.proxyFailed", failedProxyCount());
   }
   $("status-message").textContent = message;
   $("status-message").title = message || status.message || ""; // failed 长消息悬停看全文
@@ -405,11 +561,11 @@ function renderStatus(status) {
   const tc = tunnelCounts();
   const countEl = $("service-count");
   countEl.textContent = String(tc.registered);
-  countEl.title = "当前已映射隧道数量";
+  countEl.title = t("status.countTip");
   const failed = Number(status.failedCount ?? 0);
   const failedEl = $("status-failed");
   failedEl.hidden = failed <= 0;
-  failedEl.textContent = failed > 0 ? `${failed} 失败` : "";
+  failedEl.textContent = failed > 0 ? t("status.failedCount", failed) : "";
 
   setStartedAt(status.state === "running" ? status.startedAt : null);
 }
@@ -433,20 +589,20 @@ function renderSnapshot(snapshot) {
 
 // svcBadgeHTML：逐服务运行状态徽章（已停用优先；状态以其归属 Frps 实例为准，proxy 采样仅 enabled 有意义）
 function svcBadgeHTML(svc) {
-  if (!svc.enabled) return '<span class="tag tag-disabled">已停用</span>';
+  if (!svc.enabled) return `<span class="tag tag-disabled">${esc(t("badge.disabled"))}</span>`;
   const tunnelState = serverStatus(svc.serverId).state;
-  if (tunnelState === "starting") return '<span class="tag tag-proxy">等待连接</span>';
-  if (tunnelState !== "running") return '<span class="tag tag-proxy">未启动</span>';
+  if (tunnelState === "starting") return `<span class="tag tag-proxy">${esc(t("badge.waiting"))}</span>`;
+  if (tunnelState !== "running") return `<span class="tag tag-proxy">${esc(t("badge.notRunning"))}</span>`;
   const ps = state.proxyStatus[svc.id];
-  if (!ps || ps.state === "starting") return '<span class="tag tag-proxy">注册中</span>';
-  if (ps.state === "unregistered") return '<span class="tag tag-proxy">未注册</span>';
+  if (!ps || ps.state === "starting") return `<span class="tag tag-proxy">${esc(t("badge.registering"))}</span>`;
+  if (ps.state === "unregistered") return `<span class="tag tag-proxy">${esc(t("badge.unregistered"))}</span>`;
   if (ps.state === "failed") {
     // friendly 优先；rawErr 截断展示防撐坏徽章，完整原文悬停 title 可看
-    const reason = ps.friendly || briefText(ps.rawErr, 40) || "注册失败";
+    const reason = ps.friendly || briefText(ps.rawErr, 40) || t("badge.registerFailed");
     const title = esc(ps.rawErr || reason).replaceAll('"', "&quot;");
-    return `<span class="tag tag-svc-failed" title="${title}">注册失败：${esc(reason)}</span>`;
+    return `<span class="tag tag-svc-failed" title="${title}">${esc(t("badge.registerFailedReason", reason))}</span>`;
   }
-  if (ps.state === "registered") return '<span class="tag tag-ok">已注册</span>';
+  if (ps.state === "registered") return `<span class="tag tag-ok">${esc(t("badge.registered"))}</span>`;
   return "";
 }
 
@@ -470,18 +626,18 @@ function renderServices(snapshot) {
     const addressHTML = !publicUrl
       ? ""
       : isPort
-        ? `<span class="addr-copy" data-copy="${escAttr(publicUrl)}" title="点击复制">${esc(publicUrl)}</span>`
+        ? `<span class="addr-copy" data-copy="${escAttr(publicUrl)}" title="${escAttr(t("card.clickToCopy"))}">${esc(publicUrl)}</span>`
         : `<a href="${escAttr(publicUrl)}" data-url="${escAttr(publicUrl)}">${esc(publicUrl)}</a>`;
     // 卡片展示所属配置名称（仅文本，不放选择控件）；无归属时明示
     const srvTag = server
-      ? `<span class="tag tag-srv" title="目标 Frps：${escAttr(server.name || serverConnAddr(server))}">${esc(server.name || serverConnAddr(server))}</span>`
-      : '<span class="tag tag-srv tag-srv--none" title="未分配目标 Frps，编辑后选择">未分配</span>';
+      ? `<span class="tag tag-srv" title="${escAttr(t("card.serverTip", server.name || serverConnAddr(server)))}">${esc(server.name || serverConnAddr(server))}</span>`
+      : `<span class="tag tag-srv tag-srv--none" title="${escAttr(t("card.unassignedTip"))}">${esc(t("card.unassigned"))}</span>`;
     // 复制/二维码按钮仅在卡片有公网地址时渲染
     const copyBtn = publicUrl
-      ? `<button class="btn btn-icon btn-ghost svc-op svc-op--r2" data-act="copy" data-copy="${escAttr(publicUrl)}" title="复制地址" aria-label="复制地址">${ICONS.copy}</button>`
+      ? `<button class="btn btn-icon btn-ghost svc-op svc-op--r2" data-act="copy" data-copy="${escAttr(publicUrl)}" title="${escAttr(t("action.copyAddress"))}" aria-label="${escAttr(t("action.copyAddress"))}">${ICONS.copy}</button>`
       : "";
     const qrBtn = publicUrl
-      ? `<button class="btn btn-icon btn-ghost svc-op svc-op--r3" data-act="qr" data-url="${escAttr(publicUrl)}" title="访问二维码" aria-label="显示访问二维码">${ICONS.qrCode}</button>`
+      ? `<button class="btn btn-icon btn-ghost svc-op svc-op--r3" data-act="qr" data-url="${escAttr(publicUrl)}" title="${escAttr(t("action.showQr"))}" aria-label="${escAttr(t("action.showQr"))}">${ICONS.qrCode}</button>`
       : "";
     const item = document.createElement("div");
     item.className = "service-item";
@@ -498,15 +654,15 @@ function renderServices(snapshot) {
         <div class="service-meta">
           ${addressHTML}
           ${addressHTML ? '<span class="meta-arrow" aria-hidden="true">→</span>' : ""}
-          <span title="本地映射目标">${esc(svc.localHost)}:${svc.localPort}</span>
+          <span title="${escAttr(t("card.localTargetTip"))}">${esc(svc.localHost)}:${svc.localPort}</span>
         </div>
       </div>
       <div class="service-ops">
         ${qrBtn}
         ${copyBtn}
-        <button class="btn btn-icon btn-ghost svc-op svc-op--r1" data-act="edit" title="编辑" aria-label="编辑">${ICONS.pencil}</button>
-        <button class="btn btn-icon btn-ghost svc-op svc-op-danger svc-op--r0" data-act="delete" title="删除" aria-label="删除">${ICONS.trash}</button>
-        <input type="checkbox" class="switch" data-act="toggle" ${svc.enabled ? "checked" : ""} title="启用/停用" />
+        <button class="btn btn-icon btn-ghost svc-op svc-op--r1" data-act="edit" title="${escAttr(t("action.edit"))}" aria-label="${escAttr(t("action.edit"))}">${ICONS.pencil}</button>
+        <button class="btn btn-icon btn-ghost svc-op svc-op-danger svc-op--r0" data-act="delete" title="${escAttr(t("action.delete"))}" aria-label="${escAttr(t("action.delete"))}">${ICONS.trash}</button>
+        <input type="checkbox" class="switch" data-act="toggle" ${svc.enabled ? "checked" : ""} title="${escAttr(t("action.toggleEnabled"))}" />
       </div>
     `;
     list.appendChild(item);
@@ -524,8 +680,8 @@ function renderServers() {
   for (const srv of servers) {
     const st = serverStatus(srv.id);
     const stateText = st.state === "stopped" && !services.some((s) => s.serverId === srv.id && s.enabled)
-      ? "无已启用隧道"
-      : STATE_LABELS[st.state] ?? st.state;
+      ? t("srv.noEnabledTunnels")
+      : stateLabel(st.state);
     const badgeClass =
       st.state === "running" ? "tag-ok" : st.state === "failed" ? "tag-svc-failed" : st.state === "stopped" ? "tag-disabled" : "tag-proxy";
     // 失败原因只进状态 tag 的 title，不占卡片正文
@@ -542,18 +698,18 @@ function renderServers() {
     item.innerHTML = `
       <div class="server-head">
         <span class="service-name-text" title="${escAttr(srv.name)}">${esc(srv.name)}</span>
-        <span class="tag ${badgeClass}" title="${badgeTitle}">${stateText}</span>
+        <span class="tag ${badgeClass}" title="${badgeTitle}">${esc(stateText)}</span>
       </div>
       <div class="server-addr">
-        <span class="mono" title="连接地址">${esc(connAddr)}</span>
+        <span class="mono" title="${escAttr(t("srv.connAddrTip"))}">${esc(connAddr)}</span>
       </div>
       <div class="server-foot">
-        <span>关联 ${linked} 个隧道 · 已启用 ${linkedEnabled} 个</span>
+        <span>${esc(t("srv.linked", linked, linkedEnabled))}</span>
       </div>
       <div class="server-ops">
-        <button class="btn btn-sm" data-act="srv-test" ${probing ? "disabled" : ""} title="测试控制连接与鉴权（不验证 HTTP 入口）">${probing ? "测试中…" : "测试"}</button>
-        <button class="btn btn-sm" data-act="srv-edit" title="编辑配置" aria-label="编辑配置">编辑</button>
-        <button class="btn btn-sm btn-ghost-danger" data-act="srv-delete" title="删除配置" aria-label="删除配置">删除</button>
+        <button class="btn btn-sm" data-act="srv-test" ${probing ? "disabled" : ""} title="${escAttr(t("srv.testTip"))}">${esc(probing ? t("srv.testing") : t("srv.test"))}</button>
+        <button class="btn btn-sm" data-act="srv-edit" title="${escAttr(t("srv.editTip"))}" aria-label="${escAttr(t("srv.editTip"))}">${esc(t("action.edit"))}</button>
+        <button class="btn btn-sm btn-ghost-danger" data-act="srv-delete" title="${escAttr(t("srv.deleteTip"))}" aria-label="${escAttr(t("srv.deleteTip"))}">${esc(t("action.delete"))}</button>
       </div>
     `;
     list.appendChild(item);
@@ -565,7 +721,7 @@ function renderLogs() {
     .map(
       (e) =>
         // 归属标注：LogEntry 带服务器信息则标名称，公共/旧字段标「系统」（向后兼容）
-        `<div class="log-line ${e.level}"><span class="log-time">${esc(e.timestamp)}</span><span class="log-srv">[${esc(e.serverName || "系统")}]</span>${esc(e.message)}</div>`,
+        `<div class="log-line ${e.level}"><span class="log-time">${esc(e.timestamp)}</span><span class="log-srv">[${esc(e.serverName || t("log.system"))}]</span>${esc(e.message)}</div>`,
     )
     .join("");
 }
@@ -642,7 +798,7 @@ async function run(label, fn) {
   try {
     return await fn();
   } catch (err) {
-    const msg = `${label}失败：${err.message ?? err}`;
+    const msg = t("run.fail", label, err.message ?? err);
     toast("error", msg);
     try {
       await api.AppService.FrontendLog("error", msg);
@@ -652,11 +808,11 @@ async function run(label, fn) {
 }
 
 async function refreshAll() {
-  applySnapshot(await run("加载配置", () => api.AppService.Snapshot()));
+  applySnapshot(await run(t("run.loadConfig"), () => api.AppService.Snapshot()));
 }
 
 async function loadLogs() {
-  const logs = await run("加载日志", () => api.AppService.Logs());
+  const logs = await run(t("run.loadLogs"), () => api.AppService.Logs());
   mergeLogs(logs); // 合并而非覆盖：拉取窗口内事件先到的更晚日志不丢
   renderLogs();
 }
@@ -724,7 +880,7 @@ function monotonePath(points) {
 // （api.AppService.Stats）；兑底识别顶层 api.Stats 形态，避免生成命名空间差异导致不可用。
 function callStats() {
   const fn = api.AppService?.Stats ?? api.Stats;
-  if (typeof fn !== "function") throw new Error("Stats 绑定不存在（请升级后端）");
+  if (typeof fn !== "function") throw new Error(t("stats.bindingsMissing"));
   return fn.call(api.AppService ?? api);
 }
 
@@ -745,7 +901,7 @@ async function refreshStats() {
     if (!state.stats.errLogged) {
       state.stats.errLogged = true;
       try {
-        await api.AppService.FrontendLog("error", `统计拉取失败：${state.stats.error}`);
+        await api.AppService.FrontendLog("error", t("stats.fetchFailLog", state.stats.error));
       } catch {}
     }
     renderStatsError();
@@ -787,16 +943,16 @@ function fmtMs(ms) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 }
 
-// fmtRel：相对时间（统计起点用），刚发生返回「刚刚」
+// fmtRel：相对时间（统计起点用），刚发生返回「刚刚」（随语言）
 function fmtRel(ms) {
   const abs = Math.max(0, ms);
   const MIN = 60e3;
   const HOUR = 3600e3;
   const DAY = 24 * HOUR;
-  if (abs < MIN) return "刚刚";
-  if (abs < HOUR) return `${Math.floor(abs / MIN)} 分钟前`;
-  if (abs < DAY) return `${Math.floor(abs / HOUR)} 小时前`;
-  return `${Math.floor(abs / DAY)} 天前`;
+  if (abs < MIN) return t("stats.relJustNow");
+  if (abs < HOUR) return t("stats.relMinutes", Math.floor(abs / MIN));
+  if (abs < DAY) return t("stats.relHours", Math.floor(abs / HOUR));
+  return t("stats.relDays", Math.floor(abs / DAY));
 }
 
 // fmtClock / fmtHM：RFC3339 → 本地 HH:MM:SS / HH:MM（非法时间兑底占位）
@@ -833,7 +989,7 @@ function svcDisplayName(item) {
   const sid = String(item?.serviceID ?? "");
   const list = state.snapshot?.config?.services ?? [];
   const local = list.find((s) => s.id === sid) ?? list.find((s) => sid && (s.id.startsWith(sid) || sid.startsWith(s.id)));
-  return String(local?.name ?? "").trim() || sid || "未知服务";
+  return String(local?.name ?? "").trim() || sid || t("stats.unknownService");
 }
 
 // renderStats：统计面板唯一渲染入口（数据分发到各区块；无数据不渲染空图）
@@ -848,8 +1004,8 @@ function renderStats() {
     // 同步隐藏全部区块：避免上一轮数据残留的 hidden 标记不一致
     for (const sec of $("stats-body").querySelectorAll(".stat-section")) sec.hidden = true;
     empty.hidden = false;
-    $("stats-empty-title").textContent = "暂无统计数据";
-    $("stats-empty-hint").textContent = "隧道产生访问后，这里会展示 HTTP 服务的请求统计。";
+    $("stats-empty-title").textContent = t("stats.emptyTitle");
+    $("stats-empty-hint").textContent = t("stats.emptyHint");
     return;
   }
   empty.hidden = true;
@@ -869,15 +1025,15 @@ function renderStatsError() {
   const hasData = Boolean(state.stats.data && (state.stats.data.total?.requests ?? 0) > 0);
   if (hasData) {
     $("stats-error").hidden = false;
-    $("stats-error").textContent = `刷新失败：${briefText(state.stats.error, 80)}，将自动重试`;
+    $("stats-error").textContent = t("stats.refreshFail", briefText(state.stats.error, 80));
     return;
   }
   $("stats-error").hidden = true;
   $("stats-body").hidden = true;
   for (const sec of document.querySelectorAll("#stats-body .stat-section")) sec.hidden = true;
   $("stats-empty").hidden = false;
-  $("stats-empty-title").textContent = "统计加载失败";
-  $("stats-empty-hint").textContent = `${state.stats.error}（每 2 秒自动重试）`;
+  $("stats-empty-title").textContent = t("stats.loadFailTitle");
+  $("stats-empty-hint").textContent = `${state.stats.error}${t("stats.retryHint")}`;
 }
 
 // renderStatCards：顶部数字卡片行（总请求 / 总流量 / 用户数 / 统计起点）
@@ -889,21 +1045,21 @@ function renderStatCards(data) {
   const sinceFull = isNaN(sinceMs) ? "" : new Date(sinceMs).toLocaleString();
   $("stat-cards").innerHTML = `
     <div class="stat-card">
-      <div class="stat-label">总请求</div>
+      <div class="stat-label">${esc(t("stats.totalRequests"))}</div>
       <div class="stat-value">${Number(total.requests ?? 0).toLocaleString()}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">总流量</div>
+      <div class="stat-label">${esc(t("stats.totalTraffic"))}</div>
       <div class="stat-value">${fmtBytes((total.trafficIn ?? 0) + (total.trafficOut ?? 0))}</div>
       <div class="stat-sub"><span>↓ ${fmtBytes(total.trafficIn ?? 0)}</span><span>↑ ${fmtBytes(total.trafficOut ?? 0)}</span></div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">用户数</div>
+      <div class="stat-label">${esc(t("stats.clients"))}</div>
       <div class="stat-value">${Number(total.clients ?? 0).toLocaleString()}</div>
-      <div class="stat-sub"><span>按 UA 去重</span></div>
+      <div class="stat-sub"><span>${esc(t("stats.uniqueByUA"))}</span></div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">统计起点</div>
+      <div class="stat-label">${esc(t("stats.since"))}</div>
       <div class="stat-value">${esc(sinceText)}</div>
       <div class="stat-sub" title="${escAttr(sinceFull)}">${esc(sinceFull)}</div>
     </div>
@@ -931,8 +1087,8 @@ function renderServiceRank(services) {
       <div class="rank-row">
         <div class="rank-label">
           <span class="rank-name" title="${escAttr(name)}">${esc(name)}</span>
-          ${cur ? `<span class="rank-cur" title="当前服务器：${escAttr(cur)}">当前 ${esc(cur)}</span>` : ""}
-          ${errs > 0 ? `<span class="rank-err" title="5xx 错误 ${errs} 次">${errs} 错</span>` : ""}
+          ${cur ? `<span class="rank-cur" title="${escAttr(t("stats.currentServerTip", cur))}">${esc(t("stats.currentServer", cur))}</span>` : ""}
+          ${errs > 0 ? `<span class="rank-err" title="${escAttr(t("stats.errTip", errs))}">${esc(t("stats.errCount", errs))}</span>` : ""}
           <span class="rank-count">${reqs.toLocaleString()}</span>
         </div>
         <div class="rank-bar"><i style="width:${pct}%"></i></div>
@@ -962,8 +1118,8 @@ function renderTrafficRank(services) {
       <div class="rank-row">
         <div class="rank-label">
           <span class="rank-name" title="${escAttr(name)}">${esc(name)}</span>
-          ${cur ? `<span class="rank-cur" title="当前服务器：${escAttr(cur)}">当前 ${esc(cur)}</span>` : ""}
-          <span class="rank-count" title="↓ ${escAttr(fmtBytes(s.trafficIn ?? 0))} / ↑ ${escAttr(fmtBytes(s.trafficOut ?? 0))}">${fmtBytes(total)}</span>
+          ${cur ? `<span class="rank-cur" title="${escAttr(t("stats.currentServerTip", cur))}">${esc(t("stats.currentServer", cur))}</span>` : ""}
+          <span class="rank-count" title="${escAttr(`↓ ${fmtBytes(s.trafficIn ?? 0)} / ↑ ${fmtBytes(s.trafficOut ?? 0)}`)}">${fmtBytes(total)}</span>
         </div>
         <div class="rank-bar"><i style="width:${pct}%"></i></div>
       </div>`;
@@ -1051,10 +1207,14 @@ function renderTimeline(timeline, since) {
   }
   const peak = Math.max(...slots.map((p) => p.v));
   const bucketText =
-    bucketSeconds % 3600 === 0 ? `${bucketSeconds / 3600} 小时` : bucketSeconds % 60 === 0 ? `${bucketSeconds / 60} 分钟` : `${bucketSeconds} 秒`;
+    bucketSeconds % 3600 === 0
+      ? t("stats.bucketHours", bucketSeconds / 3600)
+      : bucketSeconds % 60 === 0
+        ? t("stats.bucketMinutes", bucketSeconds / 60)
+        : t("stats.bucketSeconds", bucketSeconds);
   // 窗口标签：since 在 6h 内时按 since 截短，首桶时间即窗口起点
-  const windowLabel = !isNaN(sinceMs) && sinceMs > now - TIMELINE_WINDOW_MS ? `自 ${fmtHM(slots[0].t)} 起` : "近 6 小时";
-  $("stat-timeline-note").textContent = `${windowLabel} · 峰值 ${peak.toLocaleString()} · ${bucketText}/桶`;
+  const windowLabel = !isNaN(sinceMs) && sinceMs > now - TIMELINE_WINDOW_MS ? t("stats.windowSince", fmtHM(slots[0].t)) : t("stats.windowRecent");
+  $("stat-timeline-note").textContent = t("stats.timelineNote", windowLabel, peak.toLocaleString(), bucketText);
 
   const W = 600;
   const H = 140;
@@ -1076,7 +1236,7 @@ function renderTimeline(timeline, since) {
     ticks.push(`<span>${esc(fmtHM(slots[i].t))}</span>`);
   }
   chart.innerHTML = `
-    <svg class="timeline-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${windowLabel}请求曲线，峰值 ${peak}">
+    <svg class="timeline-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${escAttr(t("stats.chartAria", windowLabel, peak))}">
       <defs>
         <linearGradient id="stat-area-grad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" class="grad-stop-top"></stop>
@@ -1097,7 +1257,18 @@ function renderTimeline(timeline, since) {
 
 // renderDevices：访问设备分布独立区块（donut 居中 + 图例右侧横排可换行）。
 // devices 按 count 降序由后端保证；单类 100% 时 dasharray 满圈退化为整圆；空 devices 整区块不渲染。
-const DEVICE_LABELS = { desktop: "桌面", mobile: "移动", tablet: "平板", bot: "爬虫", other: "其他" };
+const DEVICE_LABELS = {
+  desktop: "device.desktop",
+  mobile: "device.mobile",
+  tablet: "device.tablet",
+  bot: "device.bot",
+  other: "device.other",
+};
+
+// deviceLabel：设备类型 → 当前语言文案（未知类型原样展示）
+function deviceLabel(type) {
+  return DEVICE_LABELS[type] ? t(DEVICE_LABELS[type]) : type;
+}
 
 function renderDevices(devices) {
   const sec = $("stat-devices-sec");
@@ -1116,21 +1287,21 @@ function renderDevices(devices) {
   const segs = list
     .map((d) => {
       const frac = (Number(d.count) || 0) / total;
-      const label = DEVICE_LABELS[d.type] ?? d.type;
+      const label = deviceLabel(d.type);
       const count = Number(d.count) || 0;
-      const seg = `<circle class="pie-seg pie-seg--${escAttr(d.type)}" data-type="${escAttr(d.type)}" data-count="${count}" data-pct="${Math.round(frac * 100)}" data-label="${escAttr(label)}" r="${R}" cx="50" cy="50" fill="none" stroke-width="18" stroke-dasharray="${(frac * C).toFixed(2)} ${(C - frac * C).toFixed(2)}" stroke-dashoffset="${(-acc * C).toFixed(2)}" transform="rotate(-90 50 50)"><title>${escAttr(label)} ${count.toLocaleString()}（${Math.round(frac * 100)}%）</title></circle>`;
+      const seg = `<circle class="pie-seg pie-seg--${escAttr(d.type)}" data-type="${escAttr(d.type)}" data-count="${count}" data-pct="${Math.round(frac * 100)}" data-label="${escAttr(label)}" r="${R}" cx="50" cy="50" fill="none" stroke-width="18" stroke-dasharray="${(frac * C).toFixed(2)} ${(C - frac * C).toFixed(2)}" stroke-dashoffset="${(-acc * C).toFixed(2)}" transform="rotate(-90 50 50)"><title>${escAttr(t("device.segTip", label, count.toLocaleString(), Math.round(frac * 100)))}</title></circle>`;
       acc += frac;
       return seg;
     })
     .join("");
   pieBox.innerHTML = `
-    <svg class="device-pie-svg" viewBox="0 0 100 100" role="img" aria-label="设备类别分布，共 ${total} 个客户" data-total="${total}">
+    <svg class="device-pie-svg" viewBox="0 0 100 100" role="img" aria-label="${escAttr(t("device.pieAria", total))}" data-total="${total}">
       ${segs}
       <g class="pie-center">
         <!-- 中心交叉淡：默认面（clients 总数）与 hover 面（当前类），has-hover class 切换双向淡入淡出 -->
         <g class="pie-center-face pie-center-default">
           <text class="pie-total" x="50" y="53" text-anchor="middle">${total.toLocaleString()}</text>
-          <text class="pie-total-label" x="50" y="66" text-anchor="middle">客户</text>
+          <text class="pie-total-label" x="50" y="66" text-anchor="middle">${esc(t("device.clients"))}</text>
         </g>
         <g class="pie-center-face pie-center-hover" aria-hidden="true">
           <text class="pie-total" x="50" y="53" text-anchor="middle"></text>
@@ -1141,7 +1312,7 @@ function renderDevices(devices) {
     <div class="device-legend">
       ${list
         .map((d) => {
-          const label = DEVICE_LABELS[d.type] ?? d.type;
+          const label = deviceLabel(d.type);
           const count = Number(d.count) || 0;
           const pct = Math.round((count / total) * 100);
           return `<span class="legend-item"><i class="pie-dot pie-dot--${escAttr(d.type)}"></i>${esc(label)}<b>${count.toLocaleString()}</b><span class="legend-pct">${pct}%</span></span>`;
@@ -1163,7 +1334,7 @@ function applyPieHover(type) {
     svg.classList.remove("has-hover");
     segs.forEach((s) => s.classList.remove("is-hover"));
     svg.querySelector(".pie-total").textContent = total.toLocaleString();
-    svg.querySelector(".pie-total-label").textContent = "客户";
+    svg.querySelector(".pie-total-label").textContent = t("device.clients");
     return;
   }
   const seg = svg.querySelector(`.pie-seg[data-type="${type}"]`);
@@ -1199,7 +1370,7 @@ function onChartPointerMove(e) {
   line.setAttribute("x2", x.toFixed(2));
   dot.setAttribute("cx", x.toFixed(2));
   dot.setAttribute("cy", y.toFixed(2));
-  tip.textContent = `${fmtHM(slot.t)} · ${slot.v.toLocaleString()} 次`;
+  tip.textContent = t("stats.hoverTip", fmtHM(slot.t), slot.v.toLocaleString());
   // tooltip 定位：默认点右上侧，靠右缘翻到左侧、靠顶翻到下方（先展示后测量尺寸；
   // left/top 为跟随指针的位置更新，无过渡，不属动画属性）
   const px = e.clientX - chart.getBoundingClientRect().left;
@@ -1231,7 +1402,7 @@ function renderRecent(recent) {
   const keepScroll = wrap.scrollTop;
   wrap.innerHTML = `
     <table class="recent-table">
-      <thead><tr><th>时间</th><th>服务</th><th>服务器</th><th>方法</th><th>路径</th><th class="th-num">状态</th><th class="th-num">耗时</th><th class="th-num">流量</th></tr></thead>
+      <thead><tr><th>${esc(t("stats.colTime"))}</th><th>${esc(t("stats.colService"))}</th><th>${esc(t("stats.colServer"))}</th><th>${esc(t("stats.colMethod"))}</th><th>${esc(t("stats.colPath"))}</th><th class="th-num">${esc(t("stats.colStatus"))}</th><th class="th-num">${esc(t("stats.colDuration"))}</th><th class="th-num">${esc(t("stats.colTraffic"))}</th></tr></thead>
       <tbody>
         ${rows
           .map((r) => {
@@ -1249,7 +1420,7 @@ function renderRecent(recent) {
               <td class="td-path" title="${escAttr(path)}">${esc(path)}</td>
               <td class="mono td-num st-${statusClassKey(r.status)}">${esc(String(r.status ?? ""))}</td>
               <td class="mono td-num">${esc(fmtMs(r.durationMs ?? 0))}</td>
-              <td class="mono td-num td-bytes" title="入 ${escAttr(bytesIn)} / 出 ${escAttr(bytesOut)}">${esc(bytesIn)} / ${esc(bytesOut)}</td>
+              <td class="mono td-num td-bytes" title="${escAttr(t("stats.bytesTip", bytesIn, bytesOut))}">${esc(bytesIn)} / ${esc(bytesOut)}</td>
             </tr>`;
           })
           .join("")}
@@ -1300,8 +1471,8 @@ function askConfirm(message, opts = {}) {
       <div class="confirm-panel">
         <p class="confirm-text">${esc(message)}</p>
         <div class="form-actions">
-          <button class="btn" data-r="0">取消</button>
-          <button class="btn ${opts.confirmClass ?? "btn-primary"}" data-r="1">${esc(opts.confirmText ?? "删除")}</button>
+          <button class="btn" data-r="0">${esc(t("generic.cancel"))}</button>
+          <button class="btn ${opts.confirmClass ?? "btn-primary"}" data-r="1">${esc(opts.confirmText ?? t("generic.delete"))}</button>
         </div>
       </div>
     `,
@@ -1382,6 +1553,8 @@ function closeIconPopover(immediate) {
 function setServiceType(t, opts = {}) {
   const form = $("service-form");
   form.elements.type.value = t;
+  // ctx.type 跟随实际表单：切语言重算标题/预览时以当前协议为准（编辑 TCP→UDP 后标题回 UDP）
+  if (state.modalCtx?.kind === "service") state.modalCtx.type = t;
   document.querySelector('[data-fields="http"]').hidden = t !== "http";
   document.querySelector('[data-fields="port"]').hidden = !isPortType(t);
   document.querySelector('[data-fields="proto"]').hidden = t === "http"; // 协议选择仅端口服务可见
@@ -1408,18 +1581,26 @@ function syncServerSelect(type, preserve = false) {
     options = [currentSrv, ...options]; // 编辑保留归属可选项（标「当前」）
   }
   if (!options.length) {
-    sel.innerHTML = `<option value="">${type === "http" ? "暂无支持 HTTP 的 Frps 配置" : "暂无 Frps 配置"}</option>`;
+    sel.innerHTML = `<option value="">${esc(t(type === "http" ? "pick.noHttpServer" : "pick.noServer"))}</option>`;
     sel.value = "";
     sel.disabled = true;
     return;
   }
   sel.disabled = false;
   sel.innerHTML = options
-    .map((s) => `<option value="${escAttr(s.id)}">${esc(s.name || serverConnAddr(s))}${state.editingId && s.id === currentId ? "（当前）" : ""}</option>`)
+    .map((s) => `<option value="${escAttr(s.id)}">${esc(s.name || serverConnAddr(s))}${state.editingId && s.id === currentId ? esc(t("pick.currentSuffix")) : ""}</option>`)
     .join("");
   let picked = "";
-  if (preserve && selected && options.some((s) => s.id === selected)) {
-    picked = selected; // 协议切换（preserve）：已选目标仍合格则保留，不丢本次手动选择
+  if (preserve) {
+    // 语言切换/协议切换重刷文案：原样保留当前选择；未选择（多项待选）保持为空，
+    // 不套用历史记忆，避免切换语言时静默改目标。仅当已选值不在合格列表时走默认逻辑。
+    if (selected && options.some((s) => s.id === selected)) {
+      picked = selected;
+    } else if (currentId && options.some((s) => s.id === currentId)) {
+      picked = currentId; // 编辑：保留归属（含原选择为空场景）
+    } else if (!selected && options.length === 1) {
+      picked = options[0].id; // 唯一合格目标自动选
+    }
   } else if (currentId && options.some((s) => s.id === currentId)) {
     picked = currentId; // 编辑：保留归属
   } else if (options.length === 1) {
@@ -1452,31 +1633,37 @@ function updateMoveHint() {
   };
   const url = svcPublicURL(draft, srv);
   const parts = [];
-  if (url) parts.push(`访问地址：${url}`);
-  else if (isPort) parts.push("填写远程端口后生成访问地址");
-  else if (draft.subdomain) parts.push("HTTP 入口取决于该配置的根域名设置");
+  if (url) parts.push(t("hint.addr", url));
+  else if (isPort) parts.push(t("hint.fillRemotePort"));
+  else if (draft.subdomain) parts.push(t("hint.httpDepends"));
   else {
     // HTTP 空前缀：后端保存时自动生成子域名，预览不拼非法 URL
     const scheme = srv && srv.scheme === "http" ? "http" : "https";
-    const base = (srv && String(srv.baseDomain ?? "").trim()) || "该配置根域名";
+    const base = (srv && String(srv.baseDomain ?? "").trim()) || t("hint.baseDomainFallback");
     const port = srv && Number(srv.publicPort) > 0 ? `:${srv.publicPort}` : "";
-    parts.push(`保存时自动生成子域名，入口形如 ${scheme}://<子域名>.${base}${port}`);
+    parts.push(t("hint.autoSubdomain", scheme, t("hint.subdomainPlaceholder"), base, port));
   }
   if (state.editingId && sel.value !== (state.editingOrigServerId ?? "")) {
-    parts.push("切换目标会使连接短暂中断");
+    parts.push(t("hint.moveInterrupt"));
   }
-  hint.textContent = parts.join("；");
+  hint.textContent = parts.join(t("hint.join"));
   hint.hidden = false;
 }
 
 function openServiceModal(title, svc, typeOverride) {
   state.editingId = svc ? svc.id : null;
   state.editingOrigServerId = svc?.serverId ?? "";
-  $("modal-title").textContent = title;
-  const form = $("service-form");
   // 顺序关键：先回填字段值再切类型——setServiceType 会驱动目标列表与地址预览，
   // 预览必须读到本次打开的 subdomain/remotePort，而不是上一次打开的表单残留
   const type = typeOverride ?? ((svc ? svc.type : "http") || "http");
+  // 语言切换时重算动态标题用（title 参数保留旧调用方兼容，不再作为唯一来源）
+  state.modalCtx = { kind: "service", type, editing: Boolean(svc) };
+  $("modal-title").textContent = svc
+    ? t("modal.editService", svcTypeLabel(type))
+    : type === "http"
+      ? t("action.addHttp")
+      : t("action.addPort");
+  const form = $("service-form");
   form.elements.name.value = svc ? svc.name : "";
   form.elements.localHost.value = svc ? svc.localHost : "127.0.0.1";
   form.elements.localPort.value = svc ? svc.localPort : "";
@@ -1513,6 +1700,7 @@ function closeServiceModal() {
   if (modalReturnFocus && modalReturnFocus.focus) modalReturnFocus.focus();
   modalReturnFocus = null;
   state.editingId = null;
+  state.modalCtx = null;
 }
 
 // ---------- Frps 配置模态（新增/编辑服务器；HTTP 复选切换字段组，隐藏时保留已填值） ----------
@@ -1534,7 +1722,8 @@ function toggleServerHttpFields(enabled) {
 
 function openServerModal(srv) {
   state.serverEditingId = srv ? srv.id : null;
-  $("server-modal-title").textContent = srv ? "编辑 Frps 配置" : "新增 Frps 配置";
+  state.modalCtx = { kind: "server", editing: Boolean(srv) };
+  $("server-modal-title").textContent = srv ? t("modal.editServer") : t("modal.addServer");
   const form = $("server-form");
   form.elements.name.value = srv ? srv.name : "";
   form.elements.serverAddr.value = srv ? srv.serverAddr : "";
@@ -1571,6 +1760,7 @@ function closeServerModal() {
   if (state.serverReturnFocus?.focus) state.serverReturnFocus.focus();
   state.serverReturnFocus = null;
   state.serverEditingId = null;
+  state.modalCtx = null;
 }
 
 // ---------- 访问二维码弹窗（卡片二维码按钮打开）----------
@@ -1589,20 +1779,20 @@ async function openQrModal(url) {
 
   const cached = qrCache.get(url);
   if (cached) {
-    box.innerHTML = `<img src="${cached}" alt="访问地址二维码" />`;
+    box.innerHTML = `<img src="${cached}" alt="${escAttr(t("qr.imgAlt"))}" />`;
     return;
   }
-  box.innerHTML = '<span class="qr-loading">生成中…</span>';
+  box.innerHTML = `<span class="qr-loading">${esc(t("qr.loading"))}</span>`;
   try {
-    const dataUrl = await run("生成二维码", () => api.AppService.QRCode(url));
+    const dataUrl = await run(t("run.genQr"), () => api.AppService.QRCode(url));
     qrCache.set(url, dataUrl);
     // 迟到回填防串台：弹窗仍开着且展示的就是这个地址才写入
     if (!modal.hidden && $("qr-url").textContent === url) {
-      box.innerHTML = `<img src="${dataUrl}" alt="访问地址二维码" />`;
+      box.innerHTML = `<img src="${dataUrl}" alt="${escAttr(t("qr.imgAlt"))}" />`;
     }
   } catch {
     if (!modal.hidden && $("qr-url").textContent === url) {
-      box.innerHTML = '<span class="qr-loading">生成失败</span>';
+      box.innerHTML = `<span class="qr-loading">${esc(t("qr.fail"))}</span>`;
     }
   }
 }
@@ -1630,31 +1820,31 @@ function closeQrModal() {
 
 const UPDATE_BUSY_STATES = new Set(["downloading", "verifying", "installing"]);
 const UPDATE_CHIP_TEXT = {
-  available: "更新",
-  ready: "重启更新",
-  error: "重试更新", // latestVersion 保留时可点重试
-  downloading: "下载中",
-  verifying: "校验中",
-  installing: "安装中",
+  available: "update.chip",
+  ready: "update.chipReady",
+  error: "update.chipRetry", // latestVersion 保留时可点重试
+  downloading: "update.chipDownloading",
+  verifying: "update.chipVerifying",
+  installing: "update.chipInstalling",
 };
 
 // 三分支确认文案：标题（状态语义 + 新版本号）、降级一行文案、按钮文案，
 // 语义沿用既有确认框文案不改词；notes 非空走更新日志弹窗，否则用 message。
 const UPDATE_CONFIRM = {
   available: {
-    title: (v) => `发现新版本 v${v}`,
-    message: (v, cur) => `发现新版本 v${v}（当前 v${cur}）。更新将重启应用，隧道会短暂断开并在重启后自动重连，是否继续？`,
-    confirmText: "立即更新",
+    title: (v) => t("update.found", v),
+    message: (v, cur) => t("update.confirmAvailableMsg", v, cur),
+    confirmText: () => t("update.confirmNow"),
   },
   ready: {
-    title: (v) => `v${v} 已就绪`,
-    message: (v) => `v${v} 已下载并校验，重启应用完成更新？隧道会短暂断开并在重启后自动重连。`,
-    confirmText: "重启更新",
+    title: (v) => t("update.confirmReadyTitle", v),
+    message: (v) => t("update.confirmReadyMsg", v),
+    confirmText: () => t("update.chipReady"),
   },
   error: {
-    title: (v) => `重试更新到 v${v}`,
-    message: (v) => `上次更新未完成，重试更新到 v${v}？更新将重启应用，隧道会短暂断开并在重启后自动重连。`,
-    confirmText: "重试更新",
+    title: (v) => t("update.confirmErrorTitle", v),
+    message: (v) => t("update.confirmErrorMsg", v),
+    confirmText: () => t("update.chipRetry"),
   },
 };
 
@@ -1693,13 +1883,13 @@ async function checkForUpdates() {
   try {
     const info = await api.AppService.CheckForUpdates();
     if (state.update.seq === seqBefore) applyUpdateInfo(info); // 事件已先到则不覆盖渲染
-    if (info?.state === "available") toast("success", `发现新版本 v${info.latestVersion}`);
-    else if (info?.state === "ready") toast("info", "更新已就绪，可重启应用完成更新");
-    else if (info?.state === "up-to-date") toast("info", `当前已是最新版本 v${info.currentVersion}`);
-    else if (info?.state === "error") toast("error", `检查更新失败：${info.message || "未知错误"}`);
+    if (info?.state === "available") toast("success", t("update.found", info.latestVersion));
+    else if (info?.state === "ready") toast("info", t("update.readyToast"));
+    else if (info?.state === "up-to-date") toast("info", t("update.upToDateToast", info.currentVersion));
+    else if (info?.state === "error") toast("error", t("update.checkFail", info.message || t("update.unknownReason")));
     // disabled/idle 等异常态不 toast，仅渲染
   } catch (err) {
-    toast("error", `检查更新失败：${err.message ?? err}`);
+    toast("error", t("update.checkFail", err.message ?? err));
   } finally {
     state.updateChecking = false;
     renderCheckButton();
@@ -1713,7 +1903,7 @@ function renderCheckButton() {
   // 手动检查中或后台下载/安装中均禁点：防检查覆盖安装进行中的状态
   btn.disabled = state.updateChecking || busyUpdate;
   btn.classList.toggle("is-busy", state.updateChecking);
-  btn.title = state.updateChecking ? "正在检查更新…" : busyUpdate ? "更新进行中" : "检查更新";
+  btn.title = state.updateChecking ? t("update.checking") : busyUpdate ? t("update.busy") : t("update.check");
 }
 
 // renderUpdate：顶栏展示「frpdesk 当前版本」；更新 chip 可见性以 latestVersion +
@@ -1740,10 +1930,10 @@ function renderUpdate() {
     const icon = busy ? ICONS.loader : st === "ready" ? ICONS.refresh : ICONS.download;
     chip.innerHTML = `${icon}<span class="update-chip-text"></span>`;
   }
-  let text = UPDATE_CHIP_TEXT[st] ?? "更新";
-  if (st === "downloading" && Number.isFinite(info.progress)) text = `下载中 ${Math.round(info.progress)}%`;
+  let text = UPDATE_CHIP_TEXT[st] ? t(UPDATE_CHIP_TEXT[st]) : t("update.chip");
+  if (st === "downloading" && Number.isFinite(info.progress)) text = t("update.chipDownloadingPct", Math.round(info.progress));
   chip.querySelector(".update-chip-text").textContent = text;
-  chip.title = busy ? "正在更新，请稍候" : st === "error" ? `重试更新到 v${info.latestVersion}` : `更新到 v${info.latestVersion}`;
+  chip.title = busy ? t("update.tipBusy") : st === "error" ? t("update.tipRetryTo", info.latestVersion) : t("update.tipTo", info.latestVersion);
   chip.setAttribute("aria-label", chip.title);
   renderCheckButton();
 }
@@ -1805,9 +1995,9 @@ function askUpdateConfirm({ title, meta, notes, confirmText }) {
           <h3 class="update-confirm-title">${esc(title)}</h3>
           <p class="update-confirm-meta">${esc(meta)}</p>
         </div>
-        <div class="update-confirm-notes" role="region" aria-label="更新日志">${renderMarkdown(notes)}</div>
+        <div class="update-confirm-notes" role="region" aria-label="${escAttr(t("update.notesAria"))}">${renderMarkdown(notes)}</div>
         <div class="form-actions">
-          <button class="btn" data-r="0">取消</button>
+          <button class="btn" data-r="0">${esc(t("generic.cancel"))}</button>
           <button class="btn btn-primary" data-r="1">${esc(confirmText)}</button>
         </div>
       </div>
@@ -1837,11 +2027,11 @@ async function applyUpdateClick() {
     ok = notes
       ? await askUpdateConfirm({
           title: text.title(target),
-          meta: `${info.currentVersion ? `当前 v${info.currentVersion} · ` : ""}更新将重启应用，隧道会短暂断开并在重启后自动重连`,
+          meta: `${info.currentVersion ? t("update.metaCurrent", info.currentVersion) : ""}${t("update.metaRestart")}`,
           notes,
-          confirmText: text.confirmText,
+          confirmText: text.confirmText(),
         })
-      : await askConfirm(text.message(target, info.currentVersion), { confirmText: text.confirmText });
+      : await askConfirm(text.message(target, info.currentVersion), { confirmText: text.confirmText() });
   } finally {
     state.updateConfirming = false;
     renderUpdate();
@@ -1855,7 +2045,7 @@ async function applyUpdateClick() {
   try {
     await api.AppService.InstallUpdate(); // 挂起至下载+重启完成；进度经 app:update 事件渲染
   } catch (err) {
-    toast("error", `更新失败：${err.message ?? err}`); // 下载/重启的实际错误，一次可靠提示
+    toast("error", t("update.applyFail", err.message ?? err)); // 下载/重启的实际错误，一次可靠提示
   } finally {
     state.updateApplying = false;
     renderUpdate();
@@ -1905,8 +2095,8 @@ function bindEvents() {
       quit();
       return;
     }
-    askConfirm("退出将同时停止 frpc 隧道，确定退出程序？", {
-      confirmText: "退出",
+    askConfirm(t("confirm.quitMsg"), {
+      confirmText: t("action.quitConfirm"),
       confirmClass: "btn-danger",
     }).then((ok) => {
       if (ok) quit();
@@ -1950,11 +2140,11 @@ function bindEvents() {
     try {
       const wasEditing = Boolean(state.serverEditingId);
       const snapshot = wasEditing
-        ? await run("保存配置", () => api.AppService.UpdateServer(state.serverEditingId, input))
-        : await run("新增配置", () => api.AppService.CreateServer(input));
+        ? await run(t("run.saveConfig"), () => api.AppService.UpdateServer(state.serverEditingId, input))
+        : await run(t("run.createConfig"), () => api.AppService.CreateServer(input));
       closeServerModal();
       applyConfigOnly(snapshot);
-      toast("success", wasEditing ? "配置已更新" : "配置已添加");
+      toast("success", wasEditing ? t("toast.configUpdated") : t("toast.configAdded"));
     } catch {
       // 失败原因已由 run() toast（如名称重复）：模态保持打开，输入不丢
     }
@@ -1965,8 +2155,8 @@ function bindEvents() {
   $("btn-update-apply").addEventListener("click", applyUpdateClick);
 
   // 新增/编辑模态：HTTP 由入口固定；端口服务统一入口，弹窗内协议默认 TCP 可切换
-  $("btn-add-http").addEventListener("click", () => openServiceModal("新增 HTTP 服务", null, "http"));
-  $("btn-add-port").addEventListener("click", () => openServiceModal("新增 TCP / UDP 服务", null, "tcp"));
+  $("btn-add-http").addEventListener("click", () => openServiceModal(t("action.addHttp"), null, "http"));
+  $("btn-add-port").addEventListener("click", () => openServiceModal(t("action.addPort"), null, "tcp"));
   // 弹窗内协议切换（TCP/UDP）：驱动字段组/图标兜底/地址预览刷新，并保留本次已选目标
   $("svc-proto-select").addEventListener("change", (e) => setServiceType(e.target.value, { preserveServer: true }));
   document.querySelectorAll("[data-close-modal]").forEach((el) => el.addEventListener("click", closeServiceModal));
@@ -2002,7 +2192,7 @@ function bindEvents() {
     const serverId = form.elements.serverId.value;
     if (!serverId) {
       const hasTargets = eligibleServers(type, configServers()).length > 0;
-      toast("error", hasTargets ? "请选择目标 Frps" : isPort ? "暂无 Frps 配置，请先到「配置」页添加" : "暂无支持 HTTP 的 Frps 配置，请先到「配置」页添加并开启 HTTP");
+      toast("error", hasTargets ? t("pick.noTargetToast") : isPort ? t("pick.noServerToast") : t("pick.noHttpServerToast"));
       return;
     }
     const input = {
@@ -2018,12 +2208,12 @@ function bindEvents() {
     };
     try {
       const snapshot = wasEditing
-        ? await run("保存服务", () => api.AppService.UpdateService(state.editingId, input))
-        : await run("新增服务", () => api.AppService.CreateService(input));
+        ? await run(t("run.saveService"), () => api.AppService.UpdateService(state.editingId, input))
+        : await run(t("run.createService"), () => api.AppService.CreateService(input));
       setLastServer(type, serverId); // 记住本次选择供下次新建（按类型分键：http/tcp/udp）
       closeServiceModal();
       applyConfigOnly(snapshot);
-      toast("success", wasEditing ? "服务已更新" : "服务已添加");
+      toast("success", wasEditing ? t("toast.serviceUpdated") : t("toast.serviceAdded"));
     } catch {
       // 失败原因已由 run() toast 呈现（如 runtime 迁移失败）：模态保持打开，
       // 用户输入与新选择的归属均保留，不自动回滚
@@ -2070,7 +2260,7 @@ function bindEvents() {
     state.logs = [];
     state.logIds.clear(); // 同步清 id 集：切回日志 tab 重新拉取可完整加载
     renderLogs();
-    toast("info", "已清空日志显示");
+    toast("info", t("toast.logsCleared"));
   });
 
   // TCP/UDP 地址点击复制（Wails 原生剪贴板；host:port 无协议不走浏览器）/ HTTP 链接系统浏览器打开
@@ -2080,9 +2270,9 @@ function bindEvents() {
       // WKWebView 里 navigator.clipboard 受 secure context 限制，走 wails 原生剪贴板
       try {
         await window.wails.Clipboard.SetText(addr.dataset.copy);
-        toast("success", "地址已复制");
+        toast("success", t("toast.copied"));
       } catch {
-        toast("error", "复制失败");
+        toast("error", t("toast.copyFail"));
       }
       return;
     }
@@ -2163,20 +2353,20 @@ function onServiceListClick(e) {
   if (!svc) return;
 
   if (btn.dataset.act === "edit") {
-    openServiceModal(`编辑 ${svcTypeLabel(svc.type)} 服务`, svc);
+    openServiceModal(t("modal.editService", svcTypeLabel(svc.type)), svc);
   } else if (btn.dataset.act === "copy") {
     // 走 wails 原生剪贴板（与 addr-copy 同因：WKWebView 下 navigator.clipboard 受限）
     window.wails.Clipboard.SetText(btn.dataset.copy)
-      .then(() => toast("success", "地址已复制"))
-      .catch(() => toast("error", "复制失败"));
+      .then(() => toast("success", t("toast.copied")))
+      .catch(() => toast("error", t("toast.copyFail")));
   } else if (btn.dataset.act === "qr") {
     openQrModal(btn.dataset.url);
   } else if (btn.dataset.act === "delete") {
-    askConfirm(`确定删除服务「${svc.name}」？`).then((ok) => {
+    askConfirm(t("confirm.deleteService", svc.name)).then((ok) => {
       if (!ok) return;
-      run("删除服务", () => api.AppService.DeleteService(id))
+      run(t("run.deleteService"), () => api.AppService.DeleteService(id))
         .then(applyConfigOnly)
-        .then(() => toast("success", "服务已删除"))
+        .then(() => toast("success", t("toast.serviceDeleted")))
         .catch(() => {});
     });
   }
@@ -2187,7 +2377,7 @@ function onServiceListToggle(e) {
   if (!toggle) return;
   const id = toggle.closest(".service-item").dataset.id;
   state.listRenderHoldUntil = Date.now() + 600; // 动画保护窗：期间 app:snapshot 不重建卡列表
-  run("切换状态", () => api.AppService.SetServiceEnabled(id, toggle.checked))
+  run(t("run.toggleService"), () => api.AppService.SetServiceEnabled(id, toggle.checked))
     .then((snapshot) => {
       // 轻量更新：只改该服务的 enabled + 刷新计数等轻量部位；
       // 不整卡重绘（renderServices 会重建 switch，160ms 位移动画被截断）
@@ -2220,13 +2410,14 @@ function onServerListClick(e) {
     if (state.serverProbe[id]) return;
     state.serverProbe[id] = true;
     renderServers();
-    run("测试连接", () => api.AppService.TestServerConnection(id))
+    run(t("run.testConn"), () => api.AppService.TestServerConnection(id))
       .then((res) => {
         if (res?.success) {
           // 明确是控制连接/鉴权成功；core 附带的 message 仅短附，避免长 toast
+          const base = t("toast.probeOk", Number(res.latencyMs ?? 0));
           const extra = res.message ? ` · ${briefText(String(res.message), 40)}` : "";
-          toast("success", `FRPS 登录成功 · ${Number(res.latencyMs ?? 0)} ms${extra}`);
-        } else toast("error", `连接失败：${res?.message || "未知原因"}`);
+          toast("success", `${base}${extra}`);
+        } else toast("error", t("toast.probeFail", res?.message || t("toast.unknownReason")));
       })
       .catch(() => {}) // RPC 异常原因已由 run() toast
       .finally(() => {
@@ -2239,11 +2430,11 @@ function onServerListClick(e) {
   if (btn.dataset.act === "srv-edit") {
     openServerModal(srv);
   } else if (btn.dataset.act === "srv-delete") {
-    askConfirm(`确定删除 Frps 配置「${srv.name}」？仍有关联隧道（含已停用隧道）时不能删除。`).then((ok) => {
+    askConfirm(t("confirm.deleteServer", srv.name)).then((ok) => {
       if (!ok) return;
-      run("删除配置", () => api.AppService.DeleteServer(id))
+      run(t("run.deleteConfig"), () => api.AppService.DeleteServer(id))
         .then(applyConfigOnly)
-        .then(() => toast("success", "配置已删除"))
+        .then(() => toast("success", t("toast.configDeleted")))
         .catch(() => {}); // 失败原因已 toast（后端消息原样呈现）
     });
   }
@@ -2252,6 +2443,7 @@ function onServerListClick(e) {
 // ---------- 启动 ----------
 
 async function boot() {
+  initLanguage(); // 语言必须在主题/事件绑定前应用：静态文案/按钮 tip 随偏好
   initTheme();
   bindEvents();
   try {
@@ -2260,12 +2452,17 @@ async function boot() {
   // 初始拉取带重试：页面加载早期的绑定调用可能失败（响应丢失），指数退避重试兜底
   // （tryFetch 已提升为模块级，供更新信息拉取复用）。
   positionTabSlider(false); // 首帧无动画定位
+  const langSeqAtBoot = langSync.seq; // 快照拉取期间的用户语言改动使对齐作废
   const [snapRes, logRes, proxyRes] = await Promise.allSettled([
     tryFetch("Snapshot", () => api.AppService.Snapshot(), 4),
     tryFetch("Logs", () => api.AppService.Logs(), 4),
     tryFetch("ProxyStatuses", () => api.AppService.ProxyStatuses(), 4),
   ]);
-  if (snapRes.status === "fulfilled" && snapRes.value) applySnapshot(snapRes.value);
+  if (snapRes.status === "fulfilled" && snapRes.value) {
+    // 语言对齐：后端为权威（配置偏好 + 解析后的 resolved）；拉取期间用户已切语言则不覆盖
+    reconcileLanguageFromSnapshot(snapRes.value, langSeqAtBoot);
+    applySnapshot(snapRes.value);
+  }
   if (logRes.status === "fulfilled" && logRes.value) {
     mergeLogs(logRes.value); // 合并非覆盖：拉取期间 app:logs 事件已到的更晚日志不丢
     renderLogs();
@@ -2302,7 +2499,7 @@ const tryFetch = async (label, fn, attempts) => {
     } catch (err) {
       lastErr = err;
       try {
-        await api.AppService.FrontendLog("error", `${label} 第${i + 1}次失败：${err.message ?? err}`);
+        await api.AppService.FrontendLog("error", `${label} #${i + 1} 失败：${err.message ?? err}`);
       } catch {}
       await sleep(400 * (i + 1));
     }
@@ -2327,4 +2524,11 @@ export const __test = {
   renderServers,
   renderStatus,
   updateMoveHint,
+  // 语言：切换/应用/取词与启动对齐（供验证脚本直接驱动，等价点击语言按钮的完整路径）
+  setLanguagePref,
+  applyLanguage,
+  applyStaticI18n,
+  reconcileLanguageFromSnapshot,
+  langSync,
+  t,
 };

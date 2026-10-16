@@ -447,11 +447,12 @@ html[data-no-mac] .titlebar {
   min-height: 0;
 }
 
-/* 工具行：左侧 Tab 导航 + 右侧当前面板的上下文操作 */
+/* 工具行：左侧 Tab 导航 + 右侧当前面板的上下文操作（英文文案较长时允许换行，避免窄窗溢出） */
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 2px 20px 6px;
   flex-shrink: 0;
@@ -460,13 +461,16 @@ html[data-no-mac] .titlebar {
 .toolbar-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
+  margin-left: auto; /* 换行后仍靠右；未换行时与 space-between 等效 */
 }
 
 /* 同组关联按钮（新增 HTTP / TCP 两个入口）：间距比组间更紧，视觉成对 */
 .btn-pair {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 

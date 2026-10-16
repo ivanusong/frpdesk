@@ -24,7 +24,6 @@ package main
 
 import (
 	_ "embed"
-	"fmt"
 	"log/slog"
 	"sync/atomic"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 	"frpdesk/internal/tunnel"
 )
 
@@ -80,19 +80,19 @@ type trayStatusView struct {
 
 // trayViewFor 聚合状态映射：running 显示「已连接 N」（N=当前已映射隧道数，
 // 由 connectedTunnelCount 按隧道粒度统计，非服务器计数、无分母）；
-// 部分失败不停其他实例（失败原因可见）。
+// 部分失败不停其他实例（失败原因可见）。文案取 i18n 当前语言。
 func trayViewFor(s configstore.TunnelStatus, connectedTunnels int) trayStatusView {
-	v := trayStatusView{StateText: "已停止"}
+	v := trayStatusView{StateText: i18n.T(i18n.KeyStateStopped)}
 	switch s.State {
 	case configstore.StateRunning:
-		v.StateText = fmt.Sprintf("已连接 %d", connectedTunnels)
+		v.StateText = i18n.T(i18n.KeyStateRunningN, connectedTunnels)
 		v.ShowReason = s.Message != "" // 部分失败：原因行可见但不改主态
 	case configstore.StateStarting:
-		v.StateText = "启动中"
+		v.StateText = i18n.T(i18n.KeyStateStarting)
 	case configstore.StateStopping:
-		v.StateText = "停止中"
+		v.StateText = i18n.T(i18n.KeyStateStopping)
 	case configstore.StateFailed:
-		v.StateText = fmt.Sprintf("失败 %d/%d", s.FailedCount, s.TotalCount)
+		v.StateText = i18n.T(i18n.KeyStateFailedNM, s.FailedCount, s.TotalCount)
 		v.Failed = true
 		v.ShowReason = s.Message != ""
 	}
@@ -107,6 +107,13 @@ type trayController struct {
 
 	statusItem *application.MenuItem // 「frpdesk · 状态」不可点行（聚合：已连接 N/M 等）
 	reasonItem *application.MenuItem // 失败原因不可点行（按需显示）
+	showItem   *application.MenuItem // 「显示主窗口」
+	quitItem   *application.MenuItem // 「退出 frpdesk」
+
+	// lastStatus/lastCount：最近一次状态渲染输入，切语言后原样重渲染（菜单文案随语言变）
+	lastStatus  configstore.TunnelStatus
+	lastCount   int
+	hasLastView bool
 
 	quitting atomic.Bool // 退出标记：置位后 UI 闭包与动作入口全部跳过，退出不等待 UI
 }
@@ -117,19 +124,19 @@ func newTrayController(app *application.App, window *application.WebviewWindow, 
 	t := &trayController{svc: svc, app: app, window: window}
 
 	menu := app.Menu.New()
-	t.statusItem = menu.Add("frpdesk · 已停止").SetEnabled(false)
+	t.statusItem = menu.Add("frpdesk · " + i18n.T(i18n.KeyStateStopped)).SetEnabled(false)
 	t.reasonItem = menu.Add("").SetEnabled(false)
 	t.reasonItem.SetHidden(true)
 	menu.AddSeparator()
-	menu.Add("显示主窗口").OnClick(func(*application.Context) { t.restoreWindow() })
+	t.showItem = menu.Add(i18n.T(i18n.KeyTrayShow)).OnClick(func(*application.Context) { t.restoreWindow() })
 	menu.AddSeparator()
-	menu.Add("退出 frpdesk").OnClick(func(*application.Context) { t.quit() })
+	t.quitItem = menu.Add(i18n.T(i18n.KeyTrayQuit)).OnClick(func(*application.Context) { t.quit() })
 
 	// 黑白透明 PNG 模板图标自动适配深浅色（源 assets/tray-icon*.svg，
 	// 生成方式见 cmd/genicons/svg2png.swift）；failed 时换带感叹号徽标的故障图标
 	t.tray = app.SystemTray.New()
 	t.tray.SetTemplateIcon(trayIconPNG)
-	t.tray.SetTooltip("frpdesk")
+	t.tray.SetTooltip(i18n.T(i18n.KeyTrayTooltip))
 	t.tray.SetMenu(menu)
 
 	// 红色关闭按钮 / Cmd+W → 隐藏到托盘（页面与未保存编辑保留，隧道继续）。
@@ -236,6 +243,7 @@ func (t *trayController) updateStatus() {
 // applyStatus 主线程内执行：只改既有菜单项与图标，不重建菜单
 // （NSStatusItem 持有 NSMenu 引用，逐项更新下一次展开即生效）。
 func (t *trayController) applyStatus(s configstore.TunnelStatus, connectedTunnels int) {
+	t.lastStatus, t.lastCount, t.hasLastView = s, connectedTunnels, true
 	v := trayViewFor(s, connectedTunnels)
 	t.statusItem.SetLabel("frpdesk · " + v.StateText)
 	// 托盘菜单宽度有限：失败原因单行化 + 截断（完整原文在环形日志与前端 title）
@@ -247,4 +255,27 @@ func (t *trayController) applyStatus(s configstore.TunnelStatus, connectedTunnel
 		t.tray.SetTemplateIcon(trayIconPNG)
 	}
 	slog.Info("[托盘] 状态更新", "state", s.State, "message", s.Message)
+}
+
+// applyLanguage 语言切换后刷新托盘静态文案与状态行：菜单项与状态文案随新语言，
+// 最后一次状态数据原样保留（只换语言不改变业务状态）。
+func (t *trayController) applyLanguage() {
+	if t.quitting.Load() {
+		return
+	}
+	lang := i18n.Current()
+	slog.Info("[托盘] 语言切换，刷新菜单文案", "lang", lang)
+	application.InvokeAsync(func() {
+		if t.quitting.Load() {
+			return
+		}
+		t.showItem.SetLabel(i18n.T(i18n.KeyTrayShow))
+		t.quitItem.SetLabel(i18n.T(i18n.KeyTrayQuit))
+		t.tray.SetTooltip(i18n.T(i18n.KeyTrayTooltip))
+		if t.hasLastView {
+			t.applyStatus(t.lastStatus, t.lastCount)
+		} else {
+			t.statusItem.SetLabel("frpdesk · " + i18n.T(i18n.KeyStateStopped))
+		}
+	})
 }

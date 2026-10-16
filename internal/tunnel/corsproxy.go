@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 )
 
 // proxyListenHost 跨域代理固定在 loopback 监听，只对本机 frp 客户端可见。
@@ -61,7 +63,7 @@ func newCORSProxy(set *corsProxySet, localHost string, localPort int, serviceID 
 	target := net.JoinHostPort(localHost, strconv.Itoa(localPort))
 	ln, err := listenCORSProxy()
 	if err != nil {
-		return nil, fmt.Errorf("监听本地代理端口失败: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("err.listenProxyFail"), err)
 	}
 
 	// 上游连接池每实例独占：不污染全局 DefaultTransport，Close 时能关闭自己的
@@ -437,7 +439,7 @@ func (s *corsProxySet) syncTo(svcs []configstore.Service) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return fmt.Errorf("跨域代理集合已关闭")
+		return errors.New(i18n.T("err.proxySetClosed"))
 	}
 	var removed []*corsProxy
 	for id, p := range s.proxies {
@@ -460,7 +462,7 @@ func (s *corsProxySet) syncTo(svcs []configstore.Service) error {
 		}
 		p, err := newCORSProxy(s, svc.LocalHost, svc.LocalPort, svc.ID)
 		if err != nil {
-			return fmt.Errorf("服务 %s 创建本地代理失败: %w", svc.Name, err)
+			return fmt.Errorf("%s: %w", i18n.T("err.svcProxyFail", svc.Name), err)
 		}
 		s.add(svc.ID, p)
 		slog.Info("[代理] 新建 HTTP 本地代理（内置跨域+本地 Host）",

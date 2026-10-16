@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 )
 
 // stopWaitTimeout Stop/重启等待 frpc Run 收尾的最长时间。
@@ -298,7 +299,7 @@ func (m *Manager) restartLocked(notes *[]notify, server configstore.ServerConfig
 	if old := m.insts[server.ID]; old != nil {
 		m.stopInstanceLocked(notes, old)
 	}
-	st := configstore.ServerStatus{ServerID: server.ID, State: configstore.StateStarting, Message: "正在登录 frps"}
+	st := configstore.ServerStatus{ServerID: server.ID, State: configstore.StateStarting, Message: i18n.T("msg.loggingIn"), MessageKey: "msg.loggingIn"}
 	m.statuses[server.ID] = st
 	if err := m.launchLocked(notes, server, enabled); err != nil {
 		st = configstore.ServerStatus{ServerID: server.ID, State: configstore.StateFailed,
@@ -409,7 +410,7 @@ func (m *Manager) launchLocked(notes *[]notify, server configstore.ServerConfig,
 		defer close(inst.done)
 		defer func() {
 			if r := recover(); r != nil {
-				m.finishRun(inst, fmt.Errorf("frpc 内部 panic：%v", r))
+				m.finishRun(inst, fmt.Errorf("%s", i18n.T("msg.frpcPanicHit", r)))
 			}
 		}()
 		m.finishRun(inst, svc.Run(ctx))
@@ -429,7 +430,7 @@ func serviceIDs(svcs []configstore.Service) []string {
 // stopInstanceLocked 停止单实例：置过渡态并取消 Run（收尾 goroutine 写终态）。
 // 必须持有 m.mu。
 func (m *Manager) stopInstanceLocked(notes *[]notify, inst *serverInstance) {
-	m.transitionLocked(notes, inst, configstore.TunnelStatus{State: configstore.StateStopping, Message: "停止中"})
+	m.transitionLocked(notes, inst, configstore.TunnelStatus{State: configstore.StateStopping, Message: i18n.T("msg.stopping"), MessageKey: "msg.stopping"})
 	m.logLocked(notes, "info", "正在停止 frpc", inst.server.ID)
 	inst.cancel()
 	inst.releaseProxies() // 立即释放本实例代理；Run 收尾时幂等再释放一次
@@ -458,9 +459,10 @@ func (m *Manager) sampleInstance(inst *serverInstance) {
 	case configstore.StateStarting:
 		if connected {
 			m.transitionLocked(&notes, inst, configstore.TunnelStatus{
-				State:     configstore.StateRunning,
-				Message:   "已连接",
-				StartedAt: time.Now().Format(time.RFC3339),
+				State:      configstore.StateRunning,
+				Message:    i18n.T("msg.connected"),
+				MessageKey: "msg.connected",
+				StartedAt:  time.Now().Format(time.RFC3339),
 			})
 			inst.startedAt = time.Now()
 			promoted = true
@@ -468,8 +470,9 @@ func (m *Manager) sampleInstance(inst *serverInstance) {
 	case configstore.StateRunning:
 		if !connected {
 			m.transitionLocked(&notes, inst, configstore.TunnelStatus{
-				State:   configstore.StateStarting,
-				Message: "连接断开，正在重连",
+				State:      configstore.StateStarting,
+				Message:    i18n.T("msg.reconnecting"),
+				MessageKey: "msg.reconnecting",
 			})
 		}
 	}
@@ -635,14 +638,14 @@ func (m *Manager) finishRun(inst *serverInstance, err error) {
 	switch {
 	case err == nil:
 		// 正常退出：无条件写终态（不可加 state!=stopped 守卫——过渡态也是 stopped）
-		m.transitionLocked(&notes, inst, configstore.TunnelStatus{State: configstore.StateStopped, Message: "frpc 已停止"})
+		m.transitionLocked(&notes, inst, configstore.TunnelStatus{State: configstore.StateStopped, Message: i18n.T("msg.stopped"), MessageKey: "msg.stopped"})
 	case inst.state == configstore.StateStopping || inst.state == configstore.StateStopped:
 		// 主动停止/取消过程中 cancel 后 Run 返回 error 的偶发路径：终态统一「frpc 已停止」
-		m.transitionLocked(&notes, inst, configstore.TunnelStatus{State: configstore.StateStopped, Message: "frpc 已停止"})
+		m.transitionLocked(&notes, inst, configstore.TunnelStatus{State: configstore.StateStopped, Message: i18n.T("msg.stopped"), MessageKey: "msg.stopped"})
 	default:
 		m.transitionLocked(&notes, inst, configstore.TunnelStatus{
 			State:   configstore.StateFailed,
-			Message: configstore.BriefMessage(fmt.Sprintf("frpc 运行异常：%v", err), 120),
+			Message: configstore.BriefMessage(i18n.T("msg.frpcPanic", err), 120),
 		})
 	}
 	m.mu.Unlock()
@@ -654,10 +657,39 @@ func (m *Manager) transitionLocked(notes *[]notify, inst *serverInstance, ts con
 	slog.Info("[状态机]", "server", inst.server.Name, "id", inst.server.ID, "state", ts.State, "message", ts.Message, "prev", inst.state)
 	inst.state = ts.State
 	inst.message = ts.Message
-	st := configstore.ServerStatus{ServerID: inst.server.ID, State: ts.State, Message: ts.Message, StartedAt: ts.StartedAt}
+	st := configstore.ServerStatus{ServerID: inst.server.ID, State: ts.State, Message: ts.Message, MessageKey: ts.MessageKey, StartedAt: ts.StartedAt}
 	m.statuses[inst.server.ID] = st
 	*notes = append(*notes, notify{status: true})
 	return ts
+}
+
+// RefreshLocalizedMessages 语言切换后按当前语言重建全部「状态说明类」消息
+// （MessageKey 非空的 starting/stopping/running/stopped 记录），错误详情保持原文；
+// 有变化时触发一次状态通知，托盘与前端随后拿到新语言的消息。
+func (m *Manager) RefreshLocalizedMessages() {
+	m.mu.Lock()
+	var notes []notify
+	for id, st := range m.statuses {
+		if st.MessageKey == "" {
+			continue
+		}
+		msg := i18n.T(st.MessageKey)
+		if msg == st.Message {
+			continue
+		}
+		st.Message = msg
+		m.statuses[id] = st
+		if inst, ok := m.insts[id]; ok {
+			inst.message = msg
+		}
+		notes = append(notes, notify{status: true})
+	}
+	m.mu.Unlock()
+	if len(notes) == 0 {
+		return
+	}
+	slog.Info("[i18n] 状态说明文案已按新语言重建", "count", len(notes), "lang", i18n.Current())
+	m.flush(notes)
 }
 
 // logLocked 写入环形缓冲并登记日志通知。
@@ -761,7 +793,7 @@ func buildProxyCfgs(svcs []configstore.Service, proxies *corsProxySet) ([]v1.Pro
 			if proxies.get(svc.ID) == nil {
 				p, err := newCORSProxy(proxies, svc.LocalHost, svc.LocalPort, svc.ID)
 				if err != nil {
-					return nil, fmt.Errorf("服务 %s 创建本地代理失败: %w", svc.Name, err)
+					return nil, fmt.Errorf("%s: %w", i18n.T("err.svcProxyFail", svc.Name), err)
 				}
 				proxies.add(svc.ID, p)
 				slog.Info("[代理] HTTP 服务已接入本地代理（内置跨域+本地 Host）",
@@ -789,7 +821,7 @@ func buildFrpcService(server configstore.ServerConfig, enabled []configstore.Ser
 
 	configSource := source.NewConfigSource()
 	if err := configSource.ReplaceAll(proxyCfgs, nil); err != nil {
-		return nil, fmt.Errorf("注册代理配置失败: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("err.registerProxyFail"), err)
 	}
 	aggregator := source.NewAggregator(configSource)
 
@@ -798,7 +830,7 @@ func buildFrpcService(server configstore.ServerConfig, enabled []configstore.Ser
 		ConfigSourceAggregator: aggregator,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("创建 frpc 服务失败: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("err.createFrpcFail"), err)
 	}
 	return svc, nil
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 	"frpdesk/internal/stats"
 	"frpdesk/internal/tunnel"
 )
@@ -88,6 +89,53 @@ func TestSummarizeFailures(t *testing.T) {
 		t.Fatalf("无失败应返回 nil: %v", err)
 	}
 
+}
+
+// TestSetLanguagePersistsAndApplies 语言绑定：合法偏好落盘并即时应用进程语言；
+// 返回值携带偏好 + 解析后生效语言；快照携带同一 resolved 语言（前端对齐契约）；
+// 非法偏好拒绝且不影响当前语言/配置。
+func TestSetLanguagePersistsAndApplies(t *testing.T) {
+	t.Cleanup(func() { i18n.Set(i18n.ZH) })
+	svc := newTestAppService(t)
+
+	state, err := svc.SetLanguage(i18n.PrefEN)
+	if err != nil {
+		t.Fatalf("SetLanguage(en): %v", err)
+	}
+	if state.Preference != i18n.PrefEN || state.Resolved != string(i18n.EN) {
+		t.Fatalf("SetLanguage(en) 返回契约不对: %+v", state)
+	}
+	if i18n.Current() != i18n.EN {
+		t.Fatalf("进程语言应为 en，得到 %v", i18n.Current())
+	}
+	if got := svc.store.Language(); got != i18n.PrefEN {
+		t.Fatalf("偏好应落盘为 en，得到 %q", got)
+	}
+	if snap := svc.Snapshot(); snap.Language != string(i18n.EN) || snap.Config.Language != i18n.PrefEN {
+		t.Fatalf("快照应携带 resolved=后端生效语言: language=%q config.language=%q", snap.Language, snap.Config.Language)
+	}
+	if len(svc.Snapshot().Config.Services) != 0 {
+		t.Fatal("切语言不应改动配置")
+	}
+
+	// system：偏好持久化为 system，resolved 为探测结果（合法语言）
+	state, err = svc.SetLanguage(i18n.PrefSystem)
+	if err != nil {
+		t.Fatalf("SetLanguage(system): %v", err)
+	}
+	if state.Preference != i18n.PrefSystem || (state.Resolved != string(i18n.ZH) && state.Resolved != string(i18n.EN)) {
+		t.Fatalf("system 应持久化偏好并返回合法 resolved: %+v", state)
+	}
+	if snap := svc.Snapshot(); snap.Language != state.Resolved {
+		t.Fatalf("system 下快照 resolved 应与绑定返回一致: snap=%q state=%q", snap.Language, state.Resolved)
+	}
+
+	if _, err := svc.SetLanguage("fr"); err == nil {
+		t.Fatal("非法偏好应返回错误")
+	}
+	if i18n.Current() != i18n.Lang(state.Resolved) || svc.store.Language() != i18n.PrefSystem {
+		t.Fatalf("非法偏好不得改变状态: lang=%v pref=%q", i18n.Current(), svc.store.Language())
+	}
 }
 
 // TestDisableLastServiceAutoStops 禁用最后一个 enabled 隧道自动停止：

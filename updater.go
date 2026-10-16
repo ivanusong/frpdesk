@@ -23,6 +23,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/endpoint"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 )
 
 // updateManifestURL 由 build.sh 的 UPDATE_MANIFEST_URL 参数经 -ldflags 注入；
@@ -52,13 +53,14 @@ const (
 // appUpdateEvent 推送给前端的更新状态事件名，payload 为 UpdateInfo。
 const appUpdateEvent = "app:update"
 
-// 更新流程的明确错误（前端可据此提示/重试）。
+// 更新流程的哨兵错误：身份用于分支判断（errors.Is），消息按当前语言渲染
+// （通过 i18n.Err 包装返回，测试与服务端语义均不受影响）。
 var (
-	errUpdaterBusy      = errors.New("已有更新操作在进行，请稍后再试")
-	errUpdaterDisabled  = errors.New("更新检查已禁用")
-	errNoPendingUpdate  = errors.New("当前没有已检查的新版本，请先检查更新")
-	errUpdaterNotInit   = errors.New("更新器尚未初始化")
-	errUpdaterShuttingD = errors.New("应用正在退出，更新操作已取消")
+	errUpdaterBusy      = errors.New("updater busy")
+	errUpdaterDisabled  = errors.New("updater disabled")
+	errNoPendingUpdate  = errors.New("no pending update")
+	errUpdaterNotInit   = errors.New("updater not initialized")
+	errUpdaterShuttingD = errors.New("updater shutting down")
 )
 
 // UpdateInfo 推给前端的更新状态（app:update 事件 payload + 绑定返回值）。
@@ -146,7 +148,7 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 	isDev := version == "" || version == "dev"
 	if isDev {
 		c.info.State = updDisabled
-		c.info.Message = "开发版（版本号未注入），更新检查已禁用"
+		c.info.Message = i18n.T("upd.devDisabled")
 	}
 	c.mu.Unlock()
 
@@ -158,7 +160,7 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 	if strings.TrimSpace(c.manifestURL) == "" {
 		c.mu.Lock()
 		c.info.State = updDisabled
-		c.info.Message = "未配置更新源，更新检查已禁用"
+		c.info.Message = i18n.T("upd.noManifest")
 		c.mu.Unlock()
 		c.log("warn", "[更新] 未配置更新源，更新检查与安装已禁用（构建时可设置 UPDATE_MANIFEST_URL）")
 		c.notify()
@@ -168,7 +170,7 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 	prov, err := endpoint.New(endpoint.Config{URL: c.manifestURL})
 	if err != nil {
 		c.log("error", "[更新] 初始化更新源失败：%v", err)
-		c.applyState(updError, "更新源初始化失败："+configstore.BriefMessage(err.Error(), 120))
+		c.applyState(updError, i18n.T("upd.manifestInitFail", configstore.BriefMessage(err.Error(), 120)))
 		return
 	}
 
@@ -180,7 +182,7 @@ func (c *updaterController) attach(fw fwUpdater, version string, emit func(name 
 		Window:         updater.WindowNone, // 无框架更新窗口；后台检查绝不弹窗
 	}); err != nil {
 		c.log("error", "[更新] 框架更新器初始化失败：%v", err)
-		c.applyState(updError, "更新器初始化失败："+configstore.BriefMessage(err.Error(), 120))
+		c.applyState(updError, i18n.T("upd.initFail", configstore.BriefMessage(err.Error(), 120)))
 		return
 	}
 
@@ -217,21 +219,21 @@ func (c *updaterController) startupCheck() {
 func (c *updaterController) check(source string) (UpdateInfo, error) {
 	if c.disabled() {
 		c.log("warn", "[更新] %s被拒绝：开发版禁用更新检查", source)
-		return c.snapshot(), errUpdaterDisabled
+		return c.snapshot(), i18n.Err(errUpdaterDisabled, "err.updaterDisabled")
 	}
 	if err := c.ctx.Err(); err != nil {
 		c.log("warn", "[更新] %s被拒绝：应用正在退出", source)
-		return c.snapshot(), errUpdaterShuttingD
+		return c.snapshot(), i18n.Err(errUpdaterShuttingD, "err.updaterShuttingDown")
 	}
 	fw := c.current()
 	if fw == nil {
-		return c.snapshot(), errUpdaterNotInit
+		return c.snapshot(), i18n.Err(errUpdaterNotInit, "err.updaterNotInit")
 	}
 	// 操作互斥：与下载/重启流程全程互斥（含框架 Check 调用期间），忙时明确拒绝。
 	// 持锁期间 state 只会由本流程推进，不存在并发流程同时开始的窗口。
 	if !c.opMu.TryLock() {
 		c.log("warn", "[更新] %s被拒绝：已有更新操作（检查/下载/重启）在进行", source)
-		return c.snapshot(), errUpdaterBusy
+		return c.snapshot(), i18n.Err(errUpdaterBusy, "err.updaterBusy")
 	}
 	defer c.opMu.Unlock()
 
@@ -245,7 +247,7 @@ func (c *updaterController) check(source string) (UpdateInfo, error) {
 	if err != nil {
 		c.log("error", "[更新] %s失败：%v", source, err)
 		// 失败保留 latestVersion：已有发现不被错误回退，UI 可重试
-		c.applyState(updError, "检查更新失败："+configstore.BriefMessage(err.Error(), 120))
+		c.applyState(updError, i18n.T("upd.checkFail", configstore.BriefMessage(err.Error(), 120)))
 		return c.snapshot(), err
 	}
 	if rel == nil {
@@ -253,13 +255,13 @@ func (c *updaterController) check(source string) (UpdateInfo, error) {
 		// 已 staged 的旧包随版本确认作废
 		c.log("info", "[更新] %s结果：已是最新版本（%s）", source, c.snapshot().CurrentVersion)
 		c.invalidateStaged()
-		c.applyState(updUpToDate, "已是最新版本", true)
+		c.applyState(updUpToDate, i18n.T("upd.upToDate"), true)
 		return c.snapshot(), nil
 	}
 	c.log("info", "[更新] %s结果：发现新版本 %s（当前 %s），等待用户确认安装",
 		source, rel.Version, c.snapshot().CurrentVersion)
 	c.setLatest(rel.Version, rel.Notes)
-	c.applyState(updAvailable, "发现新版本 "+rel.Version)
+	c.applyState(updAvailable, i18n.T("upd.available", rel.Version))
 	return c.snapshot(), nil
 }
 
@@ -271,41 +273,41 @@ func (c *updaterController) check(source string) (UpdateInfo, error) {
 func (c *updaterController) install() error {
 	if c.disabled() {
 		c.log("warn", "[更新] 安装被拒绝：开发版禁用更新")
-		return errUpdaterDisabled
+		return i18n.Err(errUpdaterDisabled, "err.updaterDisabled")
 	}
 	if err := c.ctx.Err(); err != nil {
 		c.log("warn", "[更新] 安装被拒绝：应用正在退出")
-		return errUpdaterShuttingD
+		return i18n.Err(errUpdaterShuttingD, "err.updaterShuttingDown")
 	}
 	fw := c.current()
 	if fw == nil {
-		return errUpdaterNotInit
+		return i18n.Err(errUpdaterNotInit, "err.updaterNotInit")
 	}
 	// 操作互斥：与检查及另一安装流程全程互斥（含框架 Download/Restart 调用期间）
 	if !c.opMu.TryLock() {
 		c.log("warn", "[更新] 安装被拒绝：已有更新操作（检查/下载/重启）在进行")
-		return errUpdaterBusy
+		return i18n.Err(errUpdaterBusy, "err.updaterBusy")
 	}
 	defer c.opMu.Unlock()
 
 	snap := c.snapshot()
 	if snap.LatestVersion == "" {
 		c.log("warn", "[更新] 安装被拒绝：尚未检查到新版本")
-		return errNoPendingUpdate
+		return i18n.Err(errNoPendingUpdate, "err.noPendingUpdate")
 	}
 
 	// 同版更新包已就绪（上次重启失败）：跳过下载直接重启；
 	// 版本不匹配（检查发现了更新的版本）则走下方完整下载流程
 	if c.stagedVersionSnapshot() == snap.LatestVersion {
 		c.log("info", "[更新] 版本 %s 更新包已就绪，重试重启（跳过下载）", snap.LatestVersion)
-		c.applyState(updInstalling, "正在重启以应用更新")
+		c.applyState(updInstalling, i18n.T("upd.restarting"))
 		return c.finishInstall(snap.LatestVersion)
 	}
 
 	c.log("info", "[更新] 用户确认安装：开始下载版本 %s（当前 %s，源 %s）",
 		snap.LatestVersion, snap.CurrentVersion, c.manifestURL)
-	c.applyState(updDownloading, "开始下载更新")
-	c.setProgress(0, "开始下载更新")
+	c.applyState(updDownloading, i18n.T("upd.downloading"))
+	c.setProgress(0, i18n.T("upd.downloading"))
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
@@ -316,15 +318,15 @@ func (c *updaterController) install() error {
 		}
 		c.log("error", "[更新] 版本 %s 下载/校验/安装失败：%v", snap.LatestVersion, err)
 		// 保留 latestVersion，UI 可重试；实际错误直接返回前端
-		c.applyState(updError, "更新失败："+configstore.BriefMessage(err.Error(), 120))
+		c.applyState(updError, i18n.T("upd.installFail", configstore.BriefMessage(err.Error(), 120)))
 		return err
 	}
 	c.mu.Lock()
 	c.stagedVersion = snap.LatestVersion
 	c.mu.Unlock()
 	c.log("info", "[更新] 版本 %s 下载校验完成，已就绪待重启", snap.LatestVersion)
-	c.applyState(updReady, "更新已就绪，即将重启")
-	c.setProgress(100, "更新已就绪，即将重启")
+	c.applyState(updReady, i18n.T("upd.ready"))
+	c.setProgress(100, i18n.T("upd.ready"))
 
 	return c.finishInstall(snap.LatestVersion)
 }
@@ -335,7 +337,7 @@ func (c *updaterController) install() error {
 func (c *updaterController) finishInstall(version string) error {
 	fw := c.current()
 	if fw == nil {
-		return errUpdaterNotInit
+		return i18n.Err(errUpdaterNotInit, "err.updaterNotInit")
 	}
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
@@ -345,13 +347,13 @@ func (c *updaterController) finishInstall(version string) error {
 			return err
 		}
 		c.log("error", "[更新] 版本 %s 重启失败（更新包已就绪，可直接重试安装）：%v", version, err)
-		c.applyState(updError, "重启以应用更新失败："+configstore.BriefMessage(err.Error(), 120))
+		c.applyState(updError, i18n.T("upd.restartFail", configstore.BriefMessage(err.Error(), 120)))
 		return err
 	}
 	c.log("info", "[更新] 版本 %s 重启流程已启动：helper 就绪，宿主即将正常退出并替换二进制", version)
 	// 收敛到 ready 终态（覆盖 staged 重试路径的 installing 过渡态）；
 	// 宿主正常退出链（含 ServiceShutdown 停隧道）由框架 host.Quit 触发
-	c.applyState(updReady, "正在重启以应用更新")
+	c.applyState(updReady, i18n.T("upd.restarting"))
 	return nil
 }
 
@@ -380,10 +382,10 @@ func (c *updaterController) onProgress(p updater.Progress) {
 			return // 百分比未变或迟到的小百分比：不重复推送、不回退进度
 		}
 		c.info.Progress = pct
-		c.info.Message = fmt.Sprintf("正在下载更新 %s/%s", humanBytes(p.Written), humanBytes(p.Total))
+		c.info.Message = i18n.T("upd.downloadingProgress", humanBytes(p.Written), humanBytes(p.Total))
 	} else {
 		// 总大小未知：保留已有百分比，只更新字节进度消息
-		c.info.Message = fmt.Sprintf("正在下载更新（已下载 %s）", humanBytes(p.Written))
+		c.info.Message = i18n.T("upd.downloaded", humanBytes(p.Written))
 	}
 	c.mu.Unlock()
 	c.notify()
@@ -402,7 +404,7 @@ func (c *updaterController) onVerifying() {
 		return
 	}
 	c.info.State = updVerifying
-	c.info.Message = "正在校验更新包"
+	c.info.Message = i18n.T("upd.verifying")
 	c.mu.Unlock()
 	c.log("info", "[更新] 更新包校验开始")
 	c.notify()
@@ -420,7 +422,7 @@ func (c *updaterController) onInstalling() {
 		return
 	}
 	c.info.State = updInstalling
-	c.info.Message = "正在安装更新"
+	c.info.Message = i18n.T("upd.installing")
 	c.mu.Unlock()
 	c.log("info", "[更新] 更新包安装（staging）开始")
 	c.notify()
