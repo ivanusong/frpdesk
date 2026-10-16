@@ -616,6 +616,55 @@ html[data-no-mac] .titlebar {
   color: var(--text-2);
 }
 
+/* 表单字段标题行：短标题 + 小问号帮助入口。flex 行不改变标题行高（16px 按钮与
+   12px 文字行等高），两列 form-row 内带图标与不带图标的 label 首行保持对齐 */
+.field-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-title {
+  min-width: 0;
+  white-space: nowrap; /* 英文短标题（Remote port / Base domain 等）不换行 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 小问号：弱化 text-3，hover/焦点转 primary；不占输入框宽度，聚焦有可见轮廓 */
+.field-help {
+  appearance: none;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 140ms var(--ease-out);
+}
+
+.field-help .icon {
+  width: 14px;
+  height: 14px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .field-help:hover {
+    color: var(--primary);
+  }
+}
+
+.field-help:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
 .form input[type="text"],
 .form input[type="number"],
 .form input[type="password"] {
@@ -1409,11 +1458,12 @@ button.service-icon:focus-visible {
   line-height: 1.4;
 }
 
-.server-http-toggle-hint {
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--text-3);
+/* 开关标题 + 小问号同行（toggle 常驻 hint 行已移除，说明改由 help tooltip 承载） */
+.server-http-toggle-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 /* 展开的字段组：分组内轻分隔，窄窗自适应（form-row>label 已有 min-width:0） */
@@ -1423,6 +1473,23 @@ button.service-icon:focus-visible {
   gap: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
+}
+
+/* 表单帮助 tooltip：单例固定定位（JS 吸附到 .field-help 按钮并做视口夹紧），
+   轻量无动画；pointer-events: none 保证不拦截 hover/点击 */
+.field-tip {
+  position: fixed;
+  z-index: 55; /* 盖过 modal(50)，低于 confirm(60)/toast(70) */
+  max-width: 260px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.5;
+  box-shadow: var(--shadow);
+  pointer-events: none;
 }
 
 /* ===== 访问二维码弹窗：小面板居中，白底承托二维码保证暗色主题扫码对比度 ===== */

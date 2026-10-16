@@ -225,13 +225,23 @@
           </div>
           <div data-fields="http">
             <label>
-              <span data-i18n="form.subdomain">子域名前缀（留空自动生成）</span>
+              <span class="field-head">
+                <span class="field-title" data-i18n="form.subdomain">子域名前缀</span>
+                <button type="button" class="field-help" data-help="form.subdomainHelp" data-i18n-aria="form.subdomainHelpAria">
+                  <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                </button>
+              </span>
               <input name="subdomain" type="text" autocomplete="off" data-i18n-placeholder="form.subdomainPh" placeholder="例如：my-blog" />
             </label>
           </div>
           <div data-fields="port" hidden>
             <label>
-              <span data-i18n="form.remotePort">远程端口（frps 侧监听端口，必填）</span>
+              <span class="field-head">
+                <span class="field-title" data-i18n="form.remotePort">远程端口</span>
+                <button type="button" class="field-help" data-help="form.remotePortHelp" data-i18n-aria="form.remotePortHelpAria">
+                  <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                </button>
+              </span>
               <input name="remotePort" type="number" min="1" max="65535" inputmode="numeric" data-i18n-placeholder="form.remotePortPh" placeholder="例如：36000" />
             </label>
           </div>
@@ -272,18 +282,32 @@
             </label>
           </div>
           <label>
-            <span data-i18n="srvForm.authToken">authToken（可留空）</span>
+            <span class="field-head">
+              <span class="field-title" data-i18n="srvForm.authToken">authToken</span>
+              <button type="button" class="field-help" data-help="srvForm.authTokenHelp" data-i18n-aria="srvForm.authTokenHelpAria">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+              </button>
+            </span>
             <input name="authToken" type="password" autocomplete="off" data-i18n-placeholder="srvForm.authTokenPh" placeholder="留空表示无鉴权" />
           </label>
           <section class="server-http-toggle">
             <label class="server-http-toggle-head" for="srv-http-switch">
-              <span class="server-http-toggle-title" data-i18n="srvForm.httpToggle">支持 HTTP 域名</span>
+              <span class="server-http-toggle-title-wrap">
+                <span class="server-http-toggle-title" data-i18n="srvForm.httpToggle">支持 HTTP 域名</span>
+                <button type="button" class="field-help" data-help="srvForm.httpToggleHelp" data-i18n-aria="srvForm.httpToggleHelpAria">
+                  <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                </button>
+              </span>
               <input type="checkbox" class="switch" id="srv-http-switch" name="httpEnabled" role="switch" aria-controls="srv-http-fields" aria-expanded="false" />
             </label>
-            <p class="server-http-toggle-hint" data-i18n="srvForm.httpToggleHint">使用该 Frps 已配置的域名与端口作为 HTTP 服务入口</p>
             <div id="srv-http-fields" data-fields="srv-http" class="server-http-fields" hidden>
               <label>
-                <span data-i18n="srvForm.baseDomain">根域名（必填，HTTP 服务入口）</span>
+                <span class="field-head">
+                  <span class="field-title" data-i18n="srvForm.baseDomain">根域名</span>
+                  <button type="button" class="field-help" data-help="srvForm.baseDomainHelp" data-i18n-aria="srvForm.baseDomainHelpAria">
+                    <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                  </button>
+                </span>
                 <input name="baseDomain" type="text" autocomplete="off" placeholder="example.com" />
               </label>
               <div class="form-row">
@@ -297,7 +321,12 @@
                   </div>
                 </label>
                 <label>
-                  <span data-i18n="srvForm.publicPort">访问端口（留空使用默认）</span>
+                  <span class="field-head">
+                    <span class="field-title" data-i18n="srvForm.publicPort">访问端口</span>
+                    <button type="button" class="field-help" data-help="srvForm.publicPortHelp" data-i18n-aria="srvForm.publicPortHelpAria">
+                      <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                    </button>
+                  </span>
                   <input name="publicPort" type="number" min="1" max="65535" inputmode="numeric" data-i18n-placeholder="srvForm.publicPortPh" placeholder="例如：8443" />
                 </label>
               </div>
@@ -319,6 +348,9 @@
         <p class="qr-url" id="qr-url"></p>
       </div>
     </div>
+
+    <!-- ===== 表单帮助 tooltip（单例；hover/focus 延迟锚定 .field-help 展示）===== -->
+    <div class="field-tip" id="field-tip" role="tooltip" hidden></div>
 
     <!-- ===== Toast 容器（顶部居中）===== -->
     <div class="toasts" id="toasts" aria-live="polite"></div>
