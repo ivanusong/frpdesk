@@ -1,16 +1,17 @@
 # 发布工作流：推送 annotated 的 v x.y.z tag 触发。版本只来自 tag（scripts/tag-version.sh，
 # 不读取仓库内版本文件），发布日志（GitHub Release 描述与 updater stable.json notes）
-# 也取自 tag 描述（scripts/tag-release-notes.sh，轻量 tag 或描述为空直接失败），
-# 然后复用 build.sh 构建三目标产物，生成 Wails updater stable.json，并以 GitHub Release 发布。
+# 也取自 tag 描述（scripts/tag-release-notes.sh，轻量 tag 或描述为空直接失败）。
+# 结构：test（单测/前端校验）→ build（矩阵：macOS 一台出 darwin+windows 四包，
+# ubuntu-24.04 / ubuntu-24.04-arm 原生出 linux 两包）→ release（聚合六平台产物生成
+# stable.json，draft 上传 8 个资产核验齐全后发布）→ sync-mirror（只消费已发布资产，
+# 不重新构建）。所有构建均检出 tag 所指代码，绝不把 main 代码打包成 tag 版本。
 # 与本地私有发布流程（MinIO/rclone）无关；普通 Build 工作流保持只读、不发布。
-# 另含独立的 sync-mirror 作业：release 成功后把已发布资产原样同步到可选 S3 镜像
-# （未配置镜像则跳过；镜像失败不影响已发布的 GitHub Release，可用 Re-run failed jobs 重跑）。
 name: Release
 
 on:
   push:
     tags:
-      # tag 形如 v0.2.9；须为 annotated tag（其描述即发布日志），版本格式与一致性在首个步骤内严格校验
+      # tag 形如 v0.2.9；须为 annotated tag（其描述即发布日志），版本格式在解析步骤严格校验
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 # 创建 Release 与上传资产需要写权限
@@ -18,27 +19,131 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: 版本校验、三目标构建与发布
+  test:
+    name: 单元测试与前端校验
     runs-on: macos-latest
     steps:
-      - name: 检出代码
+      - name: 检出代码（tag 所指代码）
+        uses: actions/checkout@v4
+
+      - name: 安装 Go（版本取自 go.mod）
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            third_party/frp/go.sum
+            third_party/wails/go.sum
+
+      - name: 确认 Runner 自带 Node（不安装任何 npm 依赖）
+        run: node --version
+
+      - name: 单元测试
+        run: go test ./...
+
+      - name: 前端多服务端行为验证（零依赖 Node 脚本）
+        run: node scripts/verify-multiserver-ui.mjs
+
+      - name: 双语词典校验（零依赖 Node 脚本）
+        run: node scripts/verify-i18n.mjs
+
+  build:
+    name: 构建六平台产物（${{ matrix.slug }}）
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            slug: mac
+            targets: darwin/arm64 darwin/amd64 windows/amd64 windows/arm64
+            artifact_paths: |
+              bin/frpdesk-*-darwin-*.zip
+              bin/frpdesk-*-windows-*.exe
+          - os: ubuntu-24.04
+            slug: linux-amd64
+            targets: linux/amd64
+            artifact_paths: bin/frpdesk-*-linux-*.tar.gz
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+            targets: linux/arm64
+            artifact_paths: bin/frpdesk-*-linux-*.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: 检出代码（tag push 事件默认检出 tag 所指代码）
+        uses: actions/checkout@v4
+
+      - name: 安装 Go（版本取自 go.mod）
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            third_party/frp/go.sum
+            third_party/wails/go.sum
+
+      - name: 安装 Linux GUI 构建依赖（GTK4 + webkitgtk-6.0，公共 Ubuntu 源）
+        # 置于 wails3 CLI 之前：CLI 生成 bindings 等命令也可能触达 GUI 构建依赖
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev
+
+      - name: 安装 wails3 CLI（固定 v3.0.0-beta.28，与 go.mod 一致）
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.28
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/wails3" version
+
+      - name: 解析 tag 版本（唯一版本来源）
+        run: |
+          set -euo pipefail
+          version="$(bash scripts/tag-version.sh)"
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "[build] 版本取自 tag：v${version}"
+
+      - name: 构建 ${{ matrix.targets }}（注入 tag 版本与更新源）
+        # FRPDESK_VERSION 显式传 tag 版本；更新源在此处注入：主源固定指向本仓库
+        # Release（由 GITHUB_REPOSITORY 推导，fork 发布时自动指向 fork 自己）；
+        # UPDATE_MIRROR_BASE_URL 来自仓库 Variable，未配置时为空，build.sh 跳过镜像注入，
+        # 应用内更新行为不变
+        env:
+          UPDATE_MANIFEST_URL: '${{ github.server_url }}/${{ github.repository }}/releases/latest/download/stable.json'
+          UPDATE_MIRROR_BASE_URL: '${{ vars.UPDATE_MIRROR_BASE_URL }}'
+        run: FRPDESK_VERSION="${VERSION}" bash build.sh ${{ matrix.targets }}
+
+      - name: 上传平台产物（按 slug 命名，避免矩阵产物碰撞）
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.slug }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: 聚合 stable.json 并发布（draft 核验后发布）
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - name: 检出代码（tag push 事件默认检出 tag 所指代码）
         uses: actions/checkout@v4
         with:
-          # checkout 会用 SHA 精确 refetch tag，把 tag ref 变成 commit；
-          # 先检 main，再单独 fetch annotated tag object 供脚本读取描述。
-          ref: refs/heads/main
           fetch-depth: 0
 
-      - name: 拉取 annotated tag object
-        # checkout 的 SHA 精确 refetch 会覆盖 tag ref；用 refspec 重新写入 tag object。
+      - name: 恢复 annotated tag object 并核验工作区
+        # actions/checkout 对 tag ref 会按 commit SHA 精确 refetch，tag ref 被重写成
+        # commit、tag object 丢失；用 refspec 强制恢复，release-notes 必须读真正的
+        # annotated tag 描述。HEAD 不变，仍为 tag 所指提交（构建代码 = tag 代码）。
         run: |
           set -euo pipefail
           git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
           test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = "tag"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")"
 
       - name: 解析 tag 版本（唯一版本来源）
-        # tag-only 发版：版本只从 annotated tag 解析，仓库内不再维护版本文件
         run: |
           set -euo pipefail
           version="$(bash scripts/tag-version.sh)"
@@ -66,38 +171,20 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           "$(go env GOPATH)/bin/wails3" version
 
-      - name: 确认 Runner 自带 Node（不安装任何 npm 依赖）
-        run: node --version
+      - name: 下载各平台构建产物（聚合到 dist/，六平台共八资产中的六个用户包）
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
 
-      - name: 单元测试
-        run: go test ./...
-
-      - name: 前端多服务端行为验证（零依赖 Node 脚本）
-        run: node scripts/verify-multiserver-ui.mjs
-
-      - name: 双语词典校验（零依赖 Node 脚本）
-        run: node scripts/verify-i18n.mjs
-
-      - name: 三目标发行构建（复用 build.sh，注入 GitHub 更新源与可选镜像根）
-        # FRPDESK_VERSION 显式传入 tag 版本；更新源在此处注入：主源固定指向本仓库
-        # Release（由 GITHUB_REPOSITORY 推导，fork 发布时自动指向 fork 自己）；
-        # UPDATE_MIRROR_BASE_URL 来自仓库 Variable，未配置时为空，build.sh 跳过镜像注入，
-        # 应用内更新行为不变
-        env:
-          UPDATE_MANIFEST_URL: '${{ github.server_url }}/${{ github.repository }}/releases/latest/download/stable.json'
-          UPDATE_MIRROR_BASE_URL: '${{ vars.UPDATE_MIRROR_BASE_URL }}'
-        run: FRPDESK_VERSION="${VERSION}" bash build.sh
-
-      - name: 打包三平台产物与许可文档包（按 VERSION 命名）
+      - name: 打包许可文档（六平台共享一个 licenses.zip）
         run: |
           set -euo pipefail
-          ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-arm64.app" "bin/frpdesk-${VERSION}-darwin-arm64.zip"
-          ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-amd64.app" "bin/frpdesk-${VERSION}-darwin-amd64.zip"
-          cp "bin/frpdesk-windows-amd64.exe" "bin/frpdesk-${VERSION}-windows-amd64.exe"
-          bash scripts/stage-license-docs.sh "bin/frpdesk-${VERSION}-licenses"
-          ditto -c -k --norsrc "bin/frpdesk-${VERSION}-licenses" "bin/frpdesk-${VERSION}-licenses.zip"
-          rm -rf "bin/frpdesk-${VERSION}-licenses"
-          ls -lh bin/frpdesk-*
+          bash scripts/stage-license-docs.sh "dist/frpdesk-${VERSION}-licenses"
+          ditto -c -k --norsrc "dist/frpdesk-${VERSION}-licenses" "dist/frpdesk-${VERSION}-licenses.zip"
+          rm -rf "dist/frpdesk-${VERSION}-licenses"
+          ls -lh dist
 
       - name: 生成 Wails updater stable.json（stable 通道，notes 取自 annotated tag 描述）
         env:
@@ -111,14 +198,17 @@ jobs:
             -name "Frpdesk v${VERSION}" \
             -url-prefix "${DOWNLOAD_BASE_URL}/v${VERSION}/" \
             -notes-file release-notes.md \
-            -output bin/stable.json \
-            "bin/frpdesk-${VERSION}-darwin-arm64.zip" \
-            "bin/frpdesk-${VERSION}-darwin-amd64.zip" \
-            "bin/frpdesk-${VERSION}-windows-amd64.exe"
+            -output dist/stable.json \
+            "dist/frpdesk-${VERSION}-darwin-arm64.zip" \
+            "dist/frpdesk-${VERSION}-darwin-amd64.zip" \
+            "dist/frpdesk-${VERSION}-windows-amd64.exe" \
+            "dist/frpdesk-${VERSION}-windows-arm64.exe" \
+            "dist/frpdesk-${VERSION}-linux-amd64.tar.gz" \
+            "dist/frpdesk-${VERSION}-linux-arm64.tar.gz"
           # 逐产物核对摘要，清单缺失/损坏时在发布前失败
-          wails3 updater verify -manifest bin/stable.json -dir bin
+          wails3 updater verify -manifest dist/stable.json -dir dist
 
-      - name: 创建 Draft Release 并上传 5 个资产
+      - name: 创建 Draft Release 并上传 8 个资产
         # gh help release create 说明直接带资产会先建 draft、传完再发布；为不依赖
         # Runner 上 gh 版本的具体实现，这里显式走 draft → upload → edit 发布。
         env:
@@ -133,11 +223,14 @@ jobs:
             --notes-file release-notes.md
           gh release upload "v${VERSION}" \
             --repo "${GITHUB_REPOSITORY}" \
-            "bin/frpdesk-${VERSION}-darwin-arm64.zip" \
-            "bin/frpdesk-${VERSION}-darwin-amd64.zip" \
-            "bin/frpdesk-${VERSION}-windows-amd64.exe" \
-            "bin/frpdesk-${VERSION}-licenses.zip" \
-            "bin/stable.json"
+            "dist/frpdesk-${VERSION}-darwin-arm64.zip" \
+            "dist/frpdesk-${VERSION}-darwin-amd64.zip" \
+            "dist/frpdesk-${VERSION}-windows-amd64.exe" \
+            "dist/frpdesk-${VERSION}-windows-arm64.exe" \
+            "dist/frpdesk-${VERSION}-linux-amd64.tar.gz" \
+            "dist/frpdesk-${VERSION}-linux-arm64.tar.gz" \
+            "dist/frpdesk-${VERSION}-licenses.zip" \
+            "dist/stable.json"
 
       - name: 校验 draft 资产齐全后发布（latest 指向的 stable.json 已就位）
         env:
@@ -149,6 +242,9 @@ jobs:
               "frpdesk-${VERSION}-darwin-arm64.zip" \
               "frpdesk-${VERSION}-darwin-amd64.zip" \
               "frpdesk-${VERSION}-windows-amd64.exe" \
+              "frpdesk-${VERSION}-windows-arm64.exe" \
+              "frpdesk-${VERSION}-linux-amd64.tar.gz" \
+              "frpdesk-${VERSION}-linux-arm64.tar.gz" \
               "frpdesk-${VERSION}-licenses.zip" \
               "stable.json" | sort
           )"
@@ -159,7 +255,7 @@ jobs:
             exit 1
           fi
           gh release edit "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false
-          echo "[release] 已发布 v${VERSION}（5 个资产齐全，latest/download/stable.json 生效）"
+          echo "[release] 已发布 v${VERSION}（8 个资产齐全，latest/download/stable.json 生效）"
 
   # 可选镜像同步：独立作业，仅依赖 GitHub Release 发布成功；从已发布资产重新下载后
   # 原样同步（不重新构建），保证镜像与 GitHub 产物逐字节一致。放在独立作业是为了
