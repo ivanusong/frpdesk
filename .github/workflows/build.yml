@@ -1,6 +1,7 @@
-# 构建工作流：在单台 macOS（Apple Silicon）Runner 上测试并打包三目标产物
-# （darwin arm64/amd64 + windows amd64），只上传 Actions 构建附件。
-# 前端零 npm，行为验证使用 Runner 自带 Node 运行零依赖脚本。
+# 构建工作流：只读构建六个用户平台包（darwin/windows/linux × amd64/arm64）并上传附件。
+# macOS Runner 一台出 darwin 双架构 + windows 双架构（windows 为纯 Go 交叉，逐架构 syso）；
+# Linux 由 ubuntu-24.04 / ubuntu-24.04-arm 原生构建（Wails Linux 走 CGO + GTK4/webkitgtk-6.0，
+# 不做 Mac 伪交叉）。前端零 npm，行为验证使用 Runner 自带 Node 运行零依赖脚本。
 # 构建版本由 build.sh 解析（FRPDESK_VERSION > git describe > dev），不读取版本文件。
 name: Build
 
@@ -18,8 +19,27 @@ permissions:
 
 jobs:
   build:
-    name: 测试与三目标构建
-    runs-on: macos-latest
+    name: 构建与测试（${{ matrix.slug }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            slug: mac
+            targets: darwin/arm64 darwin/amd64 windows/amd64 windows/arm64
+            artifact_paths: |
+              bin/frpdesk-*-darwin-*.zip
+              bin/frpdesk-*-windows-*.exe
+              bin/frpdesk-*-licenses.zip
+          - os: ubuntu-24.04
+            slug: linux-amd64
+            targets: linux/amd64
+            artifact_paths: bin/frpdesk-*-linux-*.tar.gz
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+            targets: linux/arm64
+            artifact_paths: bin/frpdesk-*-linux-*.tar.gz
+    runs-on: ${{ matrix.os }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -35,6 +55,14 @@ jobs:
             third_party/frp/go.sum
             third_party/wails/go.sum
 
+      - name: 安装 Linux GUI 构建依赖（GTK4 + webkitgtk-6.0，公共 Ubuntu 源）
+        # 置于 wails3 CLI 之前：CLI 生成 bindings 等命令也可能触达 GUI 构建依赖
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev
+
       - name: 安装 wails3 CLI（固定 v3.0.0-beta.28，与 go.mod 一致）
         run: |
           go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.28
@@ -42,15 +70,19 @@ jobs:
           "$(go env GOPATH)/bin/wails3" version
 
       - name: 确认 Runner 自带 Node（不安装任何 npm 依赖）
+        if: runner.os == 'macOS'
         run: node --version
 
       - name: 单元测试
+        if: runner.os == 'macOS'
         run: go test ./...
 
       - name: 前端多服务端行为验证（零依赖 Node 脚本）
+        if: runner.os == 'macOS'
         run: node scripts/verify-multiserver-ui.mjs
 
       - name: 双语词典校验（零依赖 Node 脚本）
+        if: runner.os == 'macOS'
         run: node scripts/verify-i18n.mjs
 
       - name: 解析构建版本（FRPDESK_VERSION 优先，否则 git describe/短 SHA 兜底）
@@ -61,34 +93,21 @@ jobs:
           echo "VERSION=${version}" >> "$GITHUB_ENV"
           echo "[build] 构建版本：${version}"
 
-      - name: 三目标构建（复用 build.sh，注入解析出的版本）
-        run: FRPDESK_VERSION="${VERSION}" bash build.sh
+      - name: 构建 ${{ matrix.targets }}（复用 build.sh，注入解析出的版本）
+        run: FRPDESK_VERSION="${VERSION}" bash build.sh ${{ matrix.targets }}
 
-      - name: 打包附件（按解析版本命名，ditto 保留 .app 可执行权限）
-        id: package
-        run: |
-          set -euo pipefail
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-arm64.app" "bin/frpdesk-${VERSION}-darwin-arm64.zip"
-          ditto -c -k --keepParent --norsrc "bin/frpdesk-darwin-amd64.app" "bin/frpdesk-${VERSION}-darwin-amd64.zip"
-          cp "bin/frpdesk-windows-amd64.exe" "bin/frpdesk-${VERSION}-windows-amd64.exe"
-          ls -lh bin/frpdesk-*
-
-      - name: 打包许可文档附件（单独随 Windows EXE 分发）
+      - name: 打包许可文档附件（六平台共享，单独随 Windows EXE 分发）
+        if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           bash scripts/stage-license-docs.sh "bin/frpdesk-${VERSION}-licenses"
           ditto -c -k --norsrc "bin/frpdesk-${VERSION}-licenses" "bin/frpdesk-${VERSION}-licenses.zip"
           rm -rf "bin/frpdesk-${VERSION}-licenses"
 
-      - name: 上传构建附件
+      - name: 上传构建附件（按 slug 命名，避免矩阵产物碰撞）
         uses: actions/upload-artifact@v4
         with:
-          name: frpdesk-${{ steps.package.outputs.version }}-build
-          path: |
-            bin/frpdesk-${{ steps.package.outputs.version }}-darwin-arm64.zip
-            bin/frpdesk-${{ steps.package.outputs.version }}-darwin-amd64.zip
-            bin/frpdesk-${{ steps.package.outputs.version }}-windows-amd64.exe
-            bin/frpdesk-${{ steps.package.outputs.version }}-licenses.zip
+          name: build-${{ matrix.slug }}
+          path: ${{ matrix.artifact_paths }}
           if-no-files-found: error
           retention-days: 14

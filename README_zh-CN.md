@@ -1,48 +1,45 @@
+[English](README.md) | 简体中文
+
 <img src="build/appicon.png" width="72" height="72" alt="">
 
 # Frpdesk
 
-Frpdesk 是 [frp](https://github.com/fatedier/frp) 的原生桌面客户端，基于 [Wails v3](https://v3.wails.io) 构建。frp 客户端直接运行在应用内，没有独立 sidecar 进程。
+Frpdesk 是 [frp](https://github.com/fatedier/frp) 的桌面客户端，通过图形界面将本地网站、API 和 TCP/UDP 服务开放到公网，无需手写客户端配置文件或单独运行 frpc。
 
 ## 功能
 
 - HTTP、TCP、UDP 隧道
-- 多 Frps 服务器配置
+- 多 FRPS 服务器配置
 - 服务状态、日志与 HTTP 请求统计
 - macOS 菜单栏后台常驻
 - 内置 HTTP 代理，支持 CORS 与 Host 改写
+- 中英文界面与应用内更新
 
-## 开发
+## 安装
 
-要求：Go 1.25+、Wails v3 CLI，以及 Node.js（用于前端校验）。
+前往 [GitHub Releases](https://github.com/ivanusong/frpdesk/releases/latest)，下载适合你设备的安装包：
 
-```bash
-wails3 dev          # 本地运行
-./build.sh          # 构建 macOS arm64/amd64 与 Windows amd64
-go test ./...       # 运行测试
-```
+| 平台 | 安装包 | 安装方式 |
+| --- | --- | --- |
+| macOS 12+（Apple Silicon） | `darwin-arm64.zip` | 解压后将应用拖入「应用程序」 |
+| macOS 12+（Intel） | `darwin-amd64.zip` | 解压后将应用拖入「应用程序」 |
+| Windows（x64） | `windows-amd64.exe` | 下载后直接运行 |
+| Windows（ARM64） | `windows-arm64.exe` | 下载后直接运行 |
+| Linux（x64） | `linux-amd64.tar.gz` | 解压后运行 `./frpdesk` |
+| Linux（ARM64） | `linux-arm64.tar.gz` | 解压后运行 `./frpdesk` |
 
-前端校验（零 npm 依赖，CI 同样执行）：
+完整文件名会在上述平台后缀前包含应用名称和版本号。安装后可在应用内检查更新。
 
-```bash
-node scripts/verify-multiserver-ui.mjs   # 多 Frps UI 行为验证
-```
+Linux 包面向 Ubuntu 24.04 或兼容的桌面系统，需要 GTK 4 与 WebKitGTK 6.0；Ubuntu 可执行 `sudo apt install libgtk-4-1 libwebkitgtk-6.0-4` 安装。Windows 和 Linux 的许可文档可下载发布页中单独的 `licenses.zip` 附件。
 
-## 发布
+## 快速使用
 
-推送 **annotated** 的 `vX.Y.Z` tag——tag 是唯一版本来源，无需维护版本号或 changelog 文件：[Release workflow](.github/workflows/release.yml) 从 tag 解析版本，并用 tag 描述（含 subject 与 body 时取 body）生成 GitHub Release 描述与 Wails updater `stable.json` 的 notes（即应用内更新提示），随后运行测试、构建 macOS 与 Windows 产物并整体发布为 GitHub Release；轻量 tag 或描述为空会在发布前失败。
+使用前需要准备一台可连接的 **FRPS 服务器**，以及服务器地址、端口和鉴权 Token（如已启用）。
 
-本地未显式指定版本时使用 `git describe --tags --always --dirty`，可用 `FRPDESK_VERSION` 覆盖。
-
-```bash
-git tag -a v0.3.0 -m "Frpdesk v0.3.0
-
-- 本次改动要点
-- 几行即可"
-git push origin v0.3.0
-```
-
-发行版在 `https://github.com/ivanusong/frpdesk/releases/latest/download/stable.json` 检查更新。
+1. 打开 Frpdesk，在「配置」中添加 FRPS 服务器信息。
+2. 新增 HTTP、TCP 或 UDP 服务，选择目标服务器，填写本地 IP 和端口，例如 `127.0.0.1:3000`。
+3. HTTP 服务填写子域名前缀；TCP/UDP 服务填写远程端口。使用 HTTP 前，需要先在服务端配置 HTTP 域名入口和泛域名解析，再在应用的服务器配置中启用「支持 HTTP 域名」并填写对应的公开入口信息。
+4. 启用服务器和服务，通过界面显示的访问地址连接本地服务。连接失败时可在应用内查看状态与日志。
 
 ## 许可证
 

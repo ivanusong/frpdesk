@@ -353,7 +353,7 @@ if [ -f "$BRIDGE/github-stable.json" ] && [ -f "$BRIDGE/mirror-stable.json" ]; t
     diff "$OUT" "$BRIDGE/mirror-stable.json" | head -20 | sed 's/^/    | /'
   fi
 else
-  echo "[跳过] C 组：未找到 $BRIDGE（离线环境可忽略）"
+  echo "[跳过] C 组：未找到 ${BRIDGE}（离线环境可忽略）"
 fi
 
 echo "===== 结果：通过=$PASS 失败=$FAIL ====="
