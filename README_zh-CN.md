@@ -6,6 +6,8 @@
 
 Frpdesk 是 [frp](https://github.com/fatedier/frp) 的桌面客户端，通过图形界面将本地网站、API 和 TCP/UDP 服务开放到公网，无需手写客户端配置文件或单独运行 frpc。
 
+![screenshot](./assets/screenshot.png)
+
 ## 功能
 
 - HTTP、TCP、UDP 隧道

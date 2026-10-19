@@ -92,6 +92,14 @@ var dict = map[string]entry{
 	"legacy.defaultServerName": {"默认服务器", "Default Server"},
 	"err.invalidLanguage":      {"语言偏好仅支持 system、zh-CN 或 en", "Language preference must be system, zh-CN, or en"},
 
+	// ---- 开机自启动（autostart） ----
+	"err.autostartExePath": {"无法确定当前程序路径", "Cannot determine the application path"},
+	"err.autostartDir":     {"无法定位系统登录启动项目录", "Cannot locate the login items directory"},
+	"err.autostartRead":    {"读取开机自启动状态失败", "Failed to read the launch-at-login state"},
+	"err.autostartWrite":   {"注册开机自启动失败", "Failed to enable launch at login"},
+	"err.autostartRemove":  {"取消开机自启动失败", "Failed to disable launch at login"},
+	"err.autostartDev":     {"开发版（版本号未注入）不支持注册开机自启动", "Launch at login is not available in development builds"},
+
 	// ---- 连接/代理运行错误（buildService 路径，failed 终态消息） ----
 	"err.listenProxyFail":   {"监听本地代理端口失败", "Failed to listen on the local proxy port"},
 	"err.svcProxyFail":      {"服务 {0} 创建本地代理失败", "Failed to create the local proxy for service {0}"},

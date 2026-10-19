@@ -11,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/updater"
 
+	"frpdesk/internal/autostart"
 	"frpdesk/internal/configstore"
 	"frpdesk/internal/i18n"
 	"frpdesk/internal/stats"
@@ -254,6 +255,55 @@ func (a *AppService) SetLanguage(pref string) (LanguageState, error) {
 // languageState 当前语言状态（偏好 + 解析后的生效语言）。
 func (a *AppService) languageState() LanguageState {
 	return LanguageState{Preference: a.store.Language(), Resolved: string(i18n.Current())}
+}
+
+// ---------- 应用设置：开机自启动 ----------
+
+// LaunchAtLoginState 开机自启动状态（绑定返回契约）：
+// Supported 当前构建是否支持注册（dev 版为 false，前端据此禁用开关并换提示）；
+// Enabled 真实系统注册状态（唯一权威，非配置文件镜像）。
+type LaunchAtLoginState struct {
+	Supported bool `json:"supported"`
+	Enabled   bool `json:"enabled"`
+}
+
+// isDevBuild 未注入版本号的构建（go run / go test）视为开发版。
+func isDevBuild() bool {
+	return currentVersion == "" || currentVersion == "dev"
+}
+
+// LaunchAtLogin 返回开机自启动的真实系统注册状态。开发版不触碰系统：把临时
+// 二进制注册成登录启动项只会留下死链，直接返回 Supported=false（前端禁用开关）。
+func (a *AppService) LaunchAtLogin() (LaunchAtLoginState, error) {
+	if isDevBuild() {
+		return LaunchAtLoginState{Supported: false, Enabled: false}, nil
+	}
+	enabled, err := autostart.Status()
+	if err != nil {
+		return LaunchAtLoginState{}, a.fail("read launch at login", err)
+	}
+	return LaunchAtLoginState{Supported: true, Enabled: enabled}, nil
+}
+
+// SetLaunchAtLogin 注册/注销开机自启动（幂等）。系统操作失败原样返回错误
+// （前端恢复开关并可见提示），绝不只写配置假装成功；成功返回注册后的真实状态。
+func (a *AppService) SetLaunchAtLogin(enabled bool) (LaunchAtLoginState, error) {
+	if isDevBuild() {
+		return LaunchAtLoginState{Supported: false, Enabled: false}, a.fail("set launch at login", i18n.LErr("err.autostartDev"))
+	}
+	if enabled {
+		if err := autostart.Enable(); err != nil {
+			return LaunchAtLoginState{}, a.fail("enable launch at login", err)
+		}
+	} else if err := autostart.Disable(); err != nil {
+		return LaunchAtLoginState{}, a.fail("disable launch at login", err)
+	}
+	enabled, err := autostart.Status()
+	if err != nil {
+		return LaunchAtLoginState{}, a.fail("read launch at login", err)
+	}
+	slog.Info("[autostart] launch at login updated", "enabled", enabled)
+	return LaunchAtLoginState{Supported: true, Enabled: enabled}, nil
 }
 
 // Snapshot 返回配置 + 聚合状态 + 逐服务器状态快照（前端绑定拉取）。

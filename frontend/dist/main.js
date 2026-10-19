@@ -50,10 +50,6 @@ const ICONS = {
   checkCircle: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
   alertCircle: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>',
   info: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
-  sun: '<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>',
-  moon: '<svg class="icon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
-  monitor: '<svg class="icon" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>',
-  gear: '<svg class="icon" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
   refresh: '<svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>',
   download: '<svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>',
   loader: '<svg class="icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>',
@@ -223,12 +219,12 @@ function briefText(s, n) {
   return chars.length > n ? chars.slice(0, n).join("") + "…" : s;
 }
 
-// ---------- 语言（首启无偏好由 system 自动解析；顶栏图标按钮打开三选一菜单）----------
+// ---------- 语言与设置弹层（顶栏齿轮：语言/主题/开机自启动）----------
 
 // 语言偏好与主题同一模式：本地先应用（首帧正确），选择变化同步后端（托盘/后端消息语言）。
 // 后端 config.json + 快照的 resolved language 为权威：system 模式不做前端独立判定，
 // 统一采用后端探测结果，避免 WebView 与原生托盘语言不一致。
-// 交互约定：顶栏语言图标打开小型菜单，三选一：自动（system）/ 简体中文（zh-CN）/
+// 交互约定：顶栏齿轮打开设置弹层，语言三选一：自动（system）/ 简体中文（zh-CN）/
 // 英语（en）；选择立即生效并持久化，选「自动」可随时回到跟随系统。
 
 // langSync：语言写入串行/去重与确认状态。
@@ -242,68 +238,68 @@ const langSync = {
   confirmed: null,
 };
 
-// 语言选项标签的词典 key（菜单项、按钮 title 共用）
-const LANG_LABEL_KEY = { system: "lang.optionSystem", "zh-CN": "lang.optionZh", en: "lang.optionEn" };
+// settingsMenuOpen：设置弹层开合状态（与 iconPopoverOpen 同模式：外部点击/Escape 关闭）
+let settingsMenuOpen = false;
+let settingsCloseTimer = null; // 退场隐藏定时器：快速重开时取消，避免把刚打开的弹层又藏掉
 
-// langLabel：偏好 → 当前语言下的人类可读名称（自动 / 简体中文 / 英语）
-function langLabel(pref) {
-  return t(LANG_LABEL_KEY[normalizePref(pref)] ?? LANG_LABEL_KEY.system);
-}
-
-// langMenuOpen：菜单开合状态（与 iconPopoverOpen 同模式：外部点击/Escape 关闭）
-let langMenuOpen = false;
-let langMenuCloseTimer = null; // 退场隐藏定时器：快速重开时取消，避免把刚打开的菜单又藏掉
-
-// renderLangButton：语言按钮为静态图标（语言切换不重绘，图标始终不变），
-// title 提示当前偏好、aria 说明用途、aria-expanded 反映菜单开合。
-function renderLangButton() {
-  const btn = $("btn-lang");
+// renderSettingsButton：齿轮按钮为静态图标（设置内容变化不重绘，图标始终不变），
+// title/aria 说明用途、aria-expanded 反映弹层开合。
+function renderSettingsButton() {
+  const btn = $("btn-settings");
   if (!btn) return;
-  btn.title = t("lang.title", langLabel(currentPref()));
-  btn.setAttribute("aria-label", t("lang.aria"));
-  btn.setAttribute("aria-expanded", String(langMenuOpen));
+  btn.title = t("settings.title");
+  btn.setAttribute("aria-label", t("settings.title"));
+  btn.setAttribute("aria-expanded", String(settingsMenuOpen));
 }
 
-// renderLangMenu：菜单项选中态（当前 pref 高亮 + aria-checked）。菜单仅三行纯语言名，
-// 当前配置只由选中态表达；applyLanguage 每次都会调用，语言切换时菜单若打开则按
-// 新语言重绘、选中项不丢（选项文案由 applyStaticI18n 的 data-i18n 统一刷新）。
-function renderLangMenu() {
-  const menu = $("lang-menu");
+// syncSettingsOptions：语言与主题两组三选一的选中态（当前值高亮 + aria-checked）。
+// 弹层打开即定位当前值；切换后重绘保持选中项不丢（选项文案由 applyStaticI18n
+// 的 data-i18n 统一刷新）。
+function syncSettingsOptions() {
+  const menu = $("settings-menu");
   if (!menu) return;
-  const cur = currentPref();
+  const curPref = currentPref();
   for (const opt of menu.querySelectorAll(".lang-option")) {
-    const on = normalizePref(opt.dataset.langPref) === cur;
+    const on = normalizePref(opt.dataset.langPref) === curPref;
+    opt.classList.toggle("is-active", on);
+    opt.setAttribute("aria-checked", String(on));
+  }
+  const curTheme = document.documentElement.dataset.theme ?? "system";
+  for (const opt of menu.querySelectorAll(".theme-option")) {
+    const on = opt.dataset.themePref === curTheme;
     opt.classList.toggle("is-active", on);
     opt.setAttribute("aria-checked", String(on));
   }
 }
 
-// openLangMenu / closeLangMenu：开关弹层。关闭走 140ms 退场过渡；返回值供
-// Escape 分流（先关菜单再处理其余 Escape 行为）。
-function openLangMenu() {
-  if (langMenuOpen) return;
-  const menu = $("lang-menu");
+// openSettingsMenu / closeSettingsMenu：开关弹层。打开时拉一次真实自启动状态
+//（不信任上次缓存）；关闭走 140ms 退场过渡；返回值供 Escape 分流（先关设置弹层
+// 再处理其余 Escape 行为）。
+function openSettingsMenu() {
+  if (settingsMenuOpen) return;
+  const menu = $("settings-menu");
   if (!menu) return;
-  renderLangMenu(); // 打开即定位当前选中项
-  clearTimeout(langMenuCloseTimer);
-  langMenuCloseTimer = null;
+  syncSettingsOptions();
+  clearTimeout(settingsCloseTimer);
+  settingsCloseTimer = null;
   menu.hidden = false;
   void menu.offsetHeight; // 提交初始态后再过渡（与图标 popover 一致）
   menu.classList.add("is-open");
-  langMenuOpen = true;
-  $("btn-lang").setAttribute("aria-expanded", "true");
+  settingsMenuOpen = true;
+  $("btn-settings").setAttribute("aria-expanded", "true");
+  refreshLaunchState(); // 每次打开拉真实系统状态，不缓存陈旧值
 }
 
-function closeLangMenu() {
-  if (!langMenuOpen) return false;
-  langMenuOpen = false;
-  const menu = $("lang-menu");
+function closeSettingsMenu() {
+  if (!settingsMenuOpen) return false;
+  settingsMenuOpen = false;
+  const menu = $("settings-menu");
   menu.classList.remove("is-open");
-  clearTimeout(langMenuCloseTimer);
-  langMenuCloseTimer = setTimeout(() => {
+  clearTimeout(settingsCloseTimer);
+  settingsCloseTimer = setTimeout(() => {
     menu.hidden = true;
   }, 160);
-  $("btn-lang").setAttribute("aria-expanded", "false");
+  $("btn-settings").setAttribute("aria-expanded", "false");
   return true;
 }
 
@@ -337,14 +333,15 @@ function refreshOpenModalI18n() {
 }
 
 // applyLanguage：语言变化后的整体重绘（纯渲染，不触发任何后端业务调用）。
-// 覆盖静态文案、主题/语言按钮、状态栏、列表卡片、日志标注、统计、更新区与
+// 覆盖静态文案、设置弹层、状态栏、列表卡片、日志标注、统计、更新区与
 // 打开中的模态动态文案，全部从内存/已有状态重渲染，不丢用户数据、不重启隧道。
 function applyLanguage() {
   applyStaticI18n();
   positionTabSlider(true); // Tab 文案宽度随语言变化，指示条需立即按新尺寸测量
   applyTheme(document.documentElement.dataset.theme ?? "system", false);
-  renderLangButton();
-  renderLangMenu();
+  renderSettingsButton();
+  syncSettingsOptions();
+  renderLaunchHint(); // 说明行在 unsupported/dev 时不走 launchHint 词典，需单独纠正
   if (state.snapshot) {
     renderSnapshot(state.snapshot);
   }
@@ -361,8 +358,8 @@ function applyLanguage() {
 function initLanguage() {
   applyPref(readStoredPref(), { persist: false });
   applyStaticI18n();
-  renderLangButton();
-  renderLangMenu();
+  renderSettingsButton();
+  syncSettingsOptions();
 }
 
 // reconcileLanguageFromSnapshot：启动快照对齐（后端权威）。
@@ -533,16 +530,12 @@ function refreshFieldTipI18n() {
   positionFieldTip(tip, fieldTipState.anchor);
 }
 
-// ---------- 主题（三态：system / light / dark，localStorage 记忆）----------
+// ---------- 主题（设置弹层内三选一：system / light / dark，localStorage 记忆）----------
 
 const THEME_KEY = "frpdesk.theme";
-const THEME_META = {
-  system: { labelKey: "theme.system", icon: ICONS.monitor },
-  light: { labelKey: "theme.light", icon: ICONS.sun },
-  dark: { labelKey: "theme.dark", icon: ICONS.moon },
-};
 
-// applyTheme：应用主题并刷新按钮（persist=false 用于语言切换时的纯重绘，不重复写存储）
+// applyTheme：应用主题（system 移除 data-theme 走 CSS 媒介查询）。persist=false
+// 用于语言切换时的纯重绘，不重复写存储。
 function applyTheme(mode, persist = true) {
   const root = document.documentElement;
   if (mode === "system") {
@@ -550,17 +543,18 @@ function applyTheme(mode, persist = true) {
   } else {
     root.dataset.theme = mode;
   }
-  const btn = $("btn-theme");
-  btn.dataset.mode = mode;
-  btn.title = t("theme.title", t(THEME_META[mode].labelKey));
-  btn.setAttribute("aria-label", t("theme.aria"));
-  btn.innerHTML = THEME_META[mode].icon;
   if (!persist) return;
   try {
     localStorage.setItem(THEME_KEY, mode);
   } catch {
     /* 隐私模式等场景允许失败 */
   }
+}
+
+// setThemePref：主题三选一（设置弹层点选），即时生效并持久化（沿用既有语义）。
+function setThemePref(mode) {
+  applyTheme(mode);
+  syncSettingsOptions();
 }
 
 function initTheme() {
@@ -572,17 +566,65 @@ function initTheme() {
   }
   if (!["system", "light", "dark"].includes(mode)) mode = "system";
   applyTheme(mode);
+  syncSettingsOptions();
   // 跟随系统时，系统切换实时生效
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     const cur = document.documentElement.dataset.theme ?? "system";
     if (cur !== "system") return;
     applyTheme("system");
+    syncSettingsOptions();
   });
-  $("btn-theme").addEventListener("click", () => {
-    const order = ["system", "light", "dark"];
-    const cur = document.documentElement.dataset.theme ?? "system";
-    applyTheme(order[(order.indexOf(cur) + 1) % order.length]);
-  });
+}
+
+// ---------- 开机自启动（设置弹层开关；真实系统注册状态，后端为权威）----------
+
+// launchSync：开关在途/能力/读取序号状态。
+//   busy：SetLaunchAtLogin RPC 在途（防重复点击，期间开关禁点）；
+//   supported：当前构建是否支持注册（dev 版为 false，开关禁用并换提示）；
+//   readSeq：读请求序号（每次发起读自增；写操作开始也自增使在途读失效）。
+//             弹层可快速关开产生并发读，旧读返回时必须丢弃：
+//             不更新开关、不弹提示，防止旧状态覆盖刚写入/刚读到的新状态。
+const launchSync = { busy: false, supported: true, readSeq: 0 };
+
+// renderLaunchHint：说明行文案（supported → 常规说明；否则 dev 降级提示）。
+// 单独成函数：applyStaticI18n 恒按 launchHint 刷新，unsupported 时由这里纠正。
+function renderLaunchHint() {
+  const hint = $("settings-launch-hint");
+  if (!hint) return;
+  hint.textContent = t(launchSync.supported ? "settings.launchHint" : "settings.launchHintDev");
+}
+
+// applyLaunchState：把后端返回的真实状态落到开关与提示行（以后端为权威）。
+function applyLaunchState(st) {
+  const el = $("launch-at-login");
+  if (!el) return;
+  launchSync.supported = Boolean(st?.supported ?? true);
+  el.checked = Boolean(st?.enabled);
+  el.disabled = !launchSync.supported;
+  renderLaunchHint();
+}
+
+// refreshLaunchState：拉取真实系统状态（设置弹层每次打开时调用）。带读序号保护：
+// 只有最新一次读（且期间未发生写操作）才允许落地；过期读静默丢弃。
+// 失败可见反馈：提示错误并禁用开关，避免基于未知状态误操作；下次打开自动重试。
+async function refreshLaunchState() {
+  const el = $("launch-at-login");
+  if (!el || launchSync.busy) return;
+  const seq = ++launchSync.readSeq;
+  el.disabled = true;
+  try {
+    const st = await api.AppService.LaunchAtLogin();
+    if (seq !== launchSync.readSeq) return; // 过期读：不更新开关、不提示
+    applyLaunchState(st);
+  } catch (err) {
+    if (seq !== launchSync.readSeq) return; // 过期读失败：同样不可见
+    el.checked = false;
+    el.disabled = true;
+    toast("error", t("settings.launchReadFail", err?.message ?? err));
+    try {
+      await api.AppService.FrontendLog("error", tEn("settings.launchReadFail", enDetail(err)));
+    } catch {}
+  }
 }
 
 // ---------- Tab 切换（底部短指示条；面板与工具行右侧操作随动显隐）----------
@@ -2260,11 +2302,11 @@ function bindEvents() {
   document
     .querySelectorAll("[data-close-qr]")
     .forEach((el) => el.addEventListener("click", closeQrModal));
-  // Escape：语言菜单/图标 popover 优先关闭，再各模态（互斥，不会同时打开）
+  // Escape：设置弹层/图标 popover 优先关闭，再各模态（互斥，不会同时打开）
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if (closeLangMenu()) {
-      $("btn-lang").focus(); // 键盘关闭后焦点回到触发按钮
+    if (closeSettingsMenu()) {
+      $("btn-settings").focus(); // 键盘关闭后焦点回到触发按钮
       return;
     }
     if (closeIconPopover()) return;
@@ -2317,18 +2359,49 @@ function bindEvents() {
   // 弹窗内协议切换（TCP/UDP）：驱动字段组/图标兜底/地址预览刷新，并保留本次已选目标
   $("svc-proto-select").addEventListener("change", (e) => setServiceType(e.target.value, { preserveServer: true }));
   document.querySelectorAll("[data-close-modal]").forEach((el) => el.addEventListener("click", closeServiceModal));
-  // 语言菜单：图标按钮开关弹层；选项点选即应用并关闭（system 允许回到自动）；
-  // 语言切换不丢菜单状态：applyLanguage 重绘选项文案与选中项
-  $("btn-lang").addEventListener("click", () => (langMenuOpen ? closeLangMenu() : openLangMenu()));
-  $("lang-menu").addEventListener("click", (e) => {
-    const opt = e.target.closest(".lang-option");
-    if (!opt) return;
-    closeLangMenu();
-    setLanguagePref(opt.dataset.langPref);
+  // 设置弹层：齿轮按钮开关；选项点选即生效并关闭（语言 system 允许回到自动，
+  // 主题沿用既有 localStorage 语义）；语言/主题切换不丢弹层状态：applyLanguage
+  // 重绘选项文案与选中项。开机自启动开关点选即时生效且保持弹层打开。
+  $("btn-settings").addEventListener("click", () => (settingsMenuOpen ? closeSettingsMenu() : openSettingsMenu()));
+  $("settings-menu").addEventListener("click", (e) => {
+    const langOpt = e.target.closest(".lang-option");
+    if (langOpt) {
+      closeSettingsMenu();
+      setLanguagePref(langOpt.dataset.langPref);
+      return;
+    }
+    const themeOpt = e.target.closest(".theme-option");
+    if (themeOpt) {
+      setThemePref(themeOpt.dataset.themePref);
+      closeSettingsMenu();
+    }
   });
-  // 点击菜单外部关闭（.lang-pick-wrap 内的点击由按钮/选项自身逻辑处理）
+  // 点击弹层外部关闭（.settings-pick-wrap 内的点击由按钮/选项自身逻辑处理）
   document.addEventListener("pointerdown", (e) => {
-    if (langMenuOpen && !e.target.closest(".lang-pick-wrap")) closeLangMenu();
+    if (settingsMenuOpen && !e.target.closest(".settings-pick-wrap")) closeSettingsMenu();
+  });
+  // 开机自启动开关：点选即时生效；失败恢复开关并可见提示（真实状态以后端为准）
+  $("launch-at-login").addEventListener("change", async (e) => {
+    const desired = e.target.checked;
+    if (launchSync.busy) {
+      e.target.checked = !desired; // 已有写入在途：回弹本次点击
+      return;
+    }
+    launchSync.busy = true;
+    launchSync.readSeq++; // 写操作开始：使一切在途读失效（落库结果才是唯一权威）
+    e.target.disabled = true;
+    try {
+      applyLaunchState(await api.AppService.SetLaunchAtLogin(desired));
+    } catch (err) {
+      e.target.checked = !desired; // 失败恢复开关（后端未变更）
+      toast("error", t("settings.launchFail", err?.message ?? err));
+      try {
+        await api.AppService.FrontendLog("error", tEn("settings.launchFail", enDetail(err)));
+      } catch {}
+    } finally {
+      launchSync.busy = false;
+      e.target.disabled = !launchSync.supported; // unsupported（dev）保持禁用
+    }
   });
 
   // 图标选择器：触发按钮开关 popover；网格点选即选中并关闭；随机/清除保持打开便于连续调整
@@ -2891,13 +2964,22 @@ export const __test = {
   renderServers,
   renderStatus,
   updateMoveHint,
-  // 语言：切换/应用/取词与启动对齐（供验证脚本直接驱动，等价点击语言按钮的完整路径）
+  // 语言：切换/应用/取词与启动对齐（供验证脚本直接驱动，等价点击选项的完整路径）
   setLanguagePref,
   applyLanguage,
   applyStaticI18n,
   reconcileLanguageFromSnapshot,
   langSync,
   t,
+  // 设置弹层：主题三选一与开机自启动状态落地（供验证脚本驱动真实代码路径）
+  setThemePref,
+  applyTheme,
+  syncSettingsOptions,
+  openSettingsMenu,
+  closeSettingsMenu,
+  applyLaunchState,
+  refreshLaunchState,
+  launchSync,
   // 诊断通道英文详情过滤（本地化错误不回流日志通道）
   enDetail,
 };

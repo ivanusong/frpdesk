@@ -495,6 +495,36 @@ const appStub = {
     if (over && over.__pending) return over.__pending.then(() => appStub.languageState(a[0]));
     return Promise.resolve(appStub.languageState(a[0]));
   },
+  // 开机自启动绑定：返回 { supported, enabled } 最小契约；记录调用供断言。
+  // appStub.launchState 为后端侧当前状态（SetLaunchAtLogin 同步变更）；
+  // appStub.results.SetLaunchAtLogin = "reject" 可注入失败（验证开关回滚与提示）。
+  launchState: { supported: true, enabled: false },
+  LaunchAtLogin: (...a) => {
+    appStub.calls.push({ name: "LaunchAtLogin", args: a });
+    const over = appStub.results.LaunchAtLogin;
+    if (over === "reject") return Promise.reject(new Error("读取开机自启动状态失败"));
+    if (over && over.__pending) {
+      // 可注入挂起读：仅首次挂起（后续调用立即返回当前状态），__payload 可指定
+      // 挂起读最终携带的陈旧载荷（验证过期读不覆盖新状态）
+      delete appStub.results.LaunchAtLogin;
+      const payload = over.__payload ?? null;
+      return over.__pending.then(() => ({ ...(payload ?? appStub.launchState) }));
+    }
+    return Promise.resolve({ ...appStub.launchState });
+  },
+  SetLaunchAtLogin: (...a) => {
+    appStub.calls.push({ name: "SetLaunchAtLogin", args: a });
+    const over = appStub.results.SetLaunchAtLogin;
+    if (over === "reject") return Promise.reject(new Error("注册开机自启动失败"));
+    if (over && over.__pending) {
+      return over.__pending.then(() => {
+        appStub.launchState = { supported: true, enabled: Boolean(a[0]) };
+        return { ...appStub.launchState };
+      });
+    }
+    appStub.launchState = { supported: true, enabled: Boolean(a[0]) };
+    return Promise.resolve({ ...appStub.launchState });
+  },
 };
 globalThis.__wailsApi = { AppService: appStub };
 
@@ -1083,31 +1113,38 @@ wailsListeners["app:proxies"][0]({ data: [{ serviceId: "svc1", state: "registere
 const bizCount = () => appStub.calls.filter((c) => ["SetServiceEnabled", "CreateService", "UpdateService", "DeleteService", "CreateServer", "UpdateServer", "DeleteServer"].includes(c.name)).length;
 check("S10 初始：偏好 zh-CN 且 html lang=zh-CN", storage.get("frpdesk.language") === "zh-CN" && document.documentElement.lang === "zh-CN", String(document.documentElement.lang));
 const tabTunnels = document.querySelector('.tab[data-tab="tunnels"]');
-const langBtn = () => document.getElementById("btn-lang");
-const langMenu = () => document.getElementById("lang-menu");
-const langOption = (p) => langMenu().querySelector(`.lang-option[data-lang-pref="${p}"]`);
-const langIconHTML = () => langBtn().querySelector("svg.icon")?.serialize() ?? "";
+// 设置弹层（齿轮）：语言/主题选项与开机自启动开关同层；语言选项选择器不变
+const settingsBtn = () => document.getElementById("btn-settings");
+const settingsMenu = () => document.getElementById("settings-menu");
+const langOption = (p) => settingsMenu().querySelector(`.lang-option[data-lang-pref="${p}"]`);
+const themeOption = (m) => settingsMenu().querySelector(`.theme-option[data-theme-pref="${m}"]`);
+const launchSwitch = () => document.getElementById("launch-at-login");
+const launchHint = () => document.getElementById("settings-launch-hint");
+const gearIconHTML = () => settingsBtn().querySelector("svg.icon")?.serialize() ?? "";
 const langSlider = document.getElementById("tab-slider");
 tabTunnels.offsetWidth = 88;
 tabTunnels.offsetLeft = 12;
 langSlider.style.width = "40px";
 langSlider.style.left = "10px";
 check(
-  "S10 初始：静态 Tab 为中文且语言入口为图标按钮（无文字态）",
+  "S10 初始：静态 Tab 为中文且设置入口为齿轮图标按钮（无文字态）",
   tabTunnels.textContent === "隧道" &&
-    Boolean(langBtn().querySelector("svg.icon")) &&
-    langBtn().textContent.trim() === "" &&
-    (langBtn().title || "").includes("界面语言：简体中文") &&
-    langBtn().getAttribute("aria-label") === "选择界面语言" &&
-    langBtn().getAttribute("aria-expanded") === "false" &&
+    Boolean(settingsBtn().querySelector("svg.icon")) &&
+    settingsBtn().textContent.trim() === "" &&
+    (settingsBtn().title || "") === "应用设置" &&
+    settingsBtn().getAttribute("aria-label") === "应用设置" &&
+    settingsBtn().getAttribute("aria-expanded") === "false" &&
     langOption("zh-CN").getAttribute("aria-checked") === "true" &&
     langOption("system").getAttribute("aria-checked") === "false" &&
     langOption("system").textContent === "自动" &&
     langOption("zh-CN").textContent === "简体中文" &&
-    langOption("en").textContent === "英语",
-  `${langBtn().textContent} / ${langBtn().title} / ${langBtn().getAttribute("aria-label")}`,
+    langOption("en").textContent === "英语" &&
+    themeOption("system").getAttribute("aria-checked") === "true" &&
+    themeOption("light").textContent === "浅色" &&
+    themeOption("dark").textContent === "深色",
+  `${settingsBtn().textContent} / ${settingsBtn().title} / ${settingsBtn().getAttribute("aria-label")}`,
 );
-const langIconBefore = langIconHTML();
+const gearIconBefore = gearIconHTML();
 
 // 记录切换前业务调用数：切语言绝不能触发隧道/服务 RPC
 const bizBefore = bizCount();
@@ -1116,13 +1153,13 @@ await T.setLanguagePref("en");
 check("S10 切英文：Tab 指示条按新文案重新定位", langSlider.style.width === "64px" && langSlider.style.left === "24px", `${langSlider.style.width} / ${langSlider.style.left}`);
 check("S10 切英文：html lang 与 localStorage 持久化", document.documentElement.lang === "en" && storage.get("frpdesk.language") === "en");
 check(
-  "S10 切英文：语言入口图标不变、tip/aria 随语言刷新",
-  Boolean(langBtn().querySelector("svg.icon")) &&
-    langIconHTML() === langIconBefore &&
-    langBtn().textContent.trim() === "" &&
-    (langBtn().title || "").includes("Interface language: English") &&
-    langBtn().getAttribute("aria-label") === "Choose interface language",
-  `${langBtn().textContent} / ${langBtn().title} / ${langBtn().getAttribute("aria-label")}`,
+  "S10 切英文：设置入口图标不变、tip/aria 随语言刷新",
+  Boolean(settingsBtn().querySelector("svg.icon")) &&
+    gearIconHTML() === gearIconBefore &&
+    settingsBtn().textContent.trim() === "" &&
+    (settingsBtn().title || "") === "App settings" &&
+    settingsBtn().getAttribute("aria-label") === "App settings",
+  `${settingsBtn().textContent} / ${settingsBtn().title} / ${settingsBtn().getAttribute("aria-label")}`,
 );
 check("S10 切英文：静态文案（Tab/按钮/空态属性）", tabTunnels.textContent === "Tunnels" && document.getElementById("btn-add-http").textContent.includes("Add HTTP") && document.getElementById("service-empty").textContent.includes("No tunnels yet"));
 check("S10 切英文：动态状态栏", document.getElementById("status-label").textContent === "Connected" && document.getElementById("service-count").title === "Currently mapped tunnels", `${document.getElementById("status-label").textContent} / ${document.getElementById("service-count").title}`);
@@ -1131,28 +1168,30 @@ check("S10 切英文：服务器卡操作文案", document.querySelector('#serve
 check("S10 切英文：后端同步 SetLanguage(en)", appStub.calls.filter((c) => c.name === "SetLanguage").at(-1)?.args?.[0] === "en");
 check("S10 切英文：不触发任何隧道/配置业务调用", bizCount() === bizBefore);
 
-// 语言菜单：图标按钮打开三选一菜单；当前 pref 高亮，点选后应用并关闭
-langBtn().click();
+// 设置弹层：齿轮按钮打开弹层（含语言/主题/自启动）；当前 pref 高亮，点选后应用并关闭
+settingsBtn().click();
 check(
-  "S10 菜单：点击图标打开三选项菜单（当前 pref 选中）",
-  langMenu().classList.contains("is-open") &&
-    langBtn().getAttribute("aria-expanded") === "true" &&
-    langMenu().hidden === false &&
-    langMenu().querySelectorAll(".lang-option").length === 3 &&
-    langMenu().getAttribute("aria-label") === "Choose interface language" &&
+  "S10 弹层：点击齿轮打开设置弹层（当前 pref 选中 + 弹层标注 aria）",
+  settingsMenu().classList.contains("is-open") &&
+    settingsBtn().getAttribute("aria-expanded") === "true" &&
+    settingsMenu().hidden === false &&
+    settingsMenu().getAttribute("aria-label") === "App settings" &&
+    settingsMenu().querySelectorAll(".lang-option").length === 3 &&
+    settingsMenu().querySelectorAll(".theme-option").length === 3 &&
+    settingsMenu().querySelector(".settings-switch-row #launch-at-login") !== null &&
     langOption("system").textContent === "Auto" &&
     langOption("zh-CN").textContent === "Simplified Chinese" &&
     langOption("en").textContent === "English" &&
     langOption("en").getAttribute("aria-checked") === "true" &&
     langOption("zh-CN").getAttribute("aria-checked") === "false" &&
     langOption("system").getAttribute("aria-checked") === "false",
-  `options=${langMenu().querySelectorAll(".lang-option").length} checked=${langOption("en").getAttribute("aria-checked")}`,
+  `lang=${settingsMenu().querySelectorAll(".lang-option").length} theme=${settingsMenu().querySelectorAll(".theme-option").length} checked=${langOption("en").getAttribute("aria-checked")}`,
 );
 // 菜单打开期间切语言：菜单保持打开，选项文案与选中项随新语言重绘
 await T.setLanguagePref("zh-CN");
 check(
   "S10 菜单：切换语言期间保持打开并重绘选中项/文案",
-  langMenu().classList.contains("is-open") &&
+  settingsMenu().classList.contains("is-open") &&
     langOption("zh-CN").getAttribute("aria-checked") === "true" &&
     langOption("en").getAttribute("aria-checked") === "false" &&
     langOption("system").textContent === "自动" &&
@@ -1165,48 +1204,194 @@ langOption("en").click();
 await sleep(20);
 check(
   "S10 菜单：点选 en 持久化、切界面并关闭菜单",
-  storage.get("frpdesk.language") === "en" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels" && !langMenu().classList.contains("is-open") && langBtn().getAttribute("aria-expanded") === "false",
+  storage.get("frpdesk.language") === "en" && document.documentElement.lang === "en" && tabTunnels.textContent === "Tunnels" && !settingsMenu().classList.contains("is-open") && settingsBtn().getAttribute("aria-expanded") === "false",
   `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`,
 );
 // 选项点选 system：允许回到自动，界面语言由后端 resolved 决定
 appStub.langSystemResolved = "zh-CN";
-langBtn().click();
+settingsBtn().click();
 langOption("system").click();
 await sleep(20);
 check(
   "S10 菜单：点选 system 回到自动（后端 resolved 决定界面）",
-  storage.get("frpdesk.language") === "system" && document.documentElement.lang === "zh-CN" && tabTunnels.textContent === "隧道" && langOption("system").getAttribute("aria-checked") === "true" && !langMenu().classList.contains("is-open"),
+  storage.get("frpdesk.language") === "system" && document.documentElement.lang === "zh-CN" && tabTunnels.textContent === "隧道" && langOption("system").getAttribute("aria-checked") === "true" && !settingsMenu().classList.contains("is-open"),
   `store=${storage.get("frpdesk.language")} lang=${document.documentElement.lang}`,
 );
 // 点击外部关闭
-langBtn().click();
+settingsBtn().click();
 document.body.dispatchEvent({ type: "pointerdown", bubbles: true });
 check(
   "S10 菜单：点击外部关闭",
-  !langMenu().classList.contains("is-open") && langBtn().getAttribute("aria-expanded") === "false",
+  !settingsMenu().classList.contains("is-open") && settingsBtn().getAttribute("aria-expanded") === "false",
 );
 // Escape 关闭并等退场过渡结束后恢复 hidden（不拦截页面点击）
-langBtn().click();
+settingsBtn().click();
 document.body.dispatchEvent({ type: "keydown", key: "Escape", bubbles: true });
 check(
   "S10 菜单：Escape 关闭并回到触发按钮焦点",
-  !langMenu().classList.contains("is-open") && langBtn().getAttribute("aria-expanded") === "false" && globalThis.__lastFocus === langBtn(),
+  !settingsMenu().classList.contains("is-open") && settingsBtn().getAttribute("aria-expanded") === "false" && globalThis.__lastFocus === settingsBtn(),
   String(globalThis.__lastFocus?.id),
 );
 await sleep(180);
-check("S10 菜单：关闭动画结束后恢复 hidden", langMenu().hidden === true);
+check("S10 菜单：关闭动画结束后恢复 hidden", settingsMenu().hidden === true);
 // 快速重开：挂起的退场隐藏定时器不得把刚打开的菜单又藏掉
-langBtn().click();
-langBtn().click();
-langBtn().click();
+settingsBtn().click();
+settingsBtn().click();
+settingsBtn().click();
 await sleep(200);
 check(
   "S10 菜单：快速重开后不被退场定时器隐藏",
-  langMenu().classList.contains("is-open") && langMenu().hidden === false && langBtn().getAttribute("aria-expanded") === "true",
+  settingsMenu().classList.contains("is-open") && settingsMenu().hidden === false && settingsBtn().getAttribute("aria-expanded") === "true",
 );
-langBtn().click();
+settingsBtn().click(); // 收起 S10 遗留弹层
 await sleep(180);
 appStub.langSystemResolved = "en"; // 恢复 stub 默认（S10a 会显式设置）
+
+// ---------- 场景 S11：设置弹层 — 主题三选一与开机自启动开关 ----------
+// 覆盖：主题点选即时生效并持久化（沿用 localStorage 语义）；自启动开关拉真实状态、
+// 点选即生效、失败回滚并可见提示、unsupported（dev）禁用并换提示。
+
+// openSettingsForTest：齿轮为开关切换，先保证弹层收起再打开，确保每次打开都
+// 触发自启动状态拉取（与真实交互一致：用户总能先看到弹层再操作）。
+async function openSettingsForTest() {
+  if (settingsMenu().classList.contains("is-open")) {
+    settingsBtn().click();
+    await sleep(10);
+  }
+  settingsBtn().click();
+  await sleep(10);
+}
+
+appStub.launchState = { supported: true, enabled: false };
+delete appStub.results.SetLaunchAtLogin;
+delete appStub.results.LaunchAtLogin;
+
+settingsBtn().click(); // 打开弹层：拉取真实自启动状态（stub 默认 false）
+await sleep(10);
+const launchCallsAtOpen = appStub.calls.filter((c) => c.name === "LaunchAtLogin").length;
+check(
+  "S11 打开弹层：拉取真实自启动状态并落到开关",
+  launchCallsAtOpen >= 1 && launchSwitch().checked === false && launchSwitch().disabled === false && launchHint().textContent.includes("登录电脑后自动运行 Frpdesk"),
+  `calls=${launchCallsAtOpen} checked=${launchSwitch().checked} hint=${launchHint().textContent}`,
+);
+
+// 主题三选一：点选 dark 即生效（html data-theme + localStorage），选中态与弹层关闭
+themeOption("dark").click();
+await sleep(10);
+check(
+  "S11 主题：点选 dark 即时生效、持久化、选中态更新并关闭弹层",
+  document.documentElement.dataset.theme === "dark" &&
+    storage.get("frpdesk.theme") === "dark" &&
+    themeOption("dark").getAttribute("aria-checked") === "true" &&
+    themeOption("system").getAttribute("aria-checked") === "false" &&
+    !settingsMenu().classList.contains("is-open"),
+  `theme=${document.documentElement.dataset.theme} store=${storage.get("frpdesk.theme")}`,
+);
+// 点选 light 与 system 回退均即时生效；system 移除 data-theme（跟随 CSS 媒介查询）
+await openSettingsForTest();
+themeOption("light").click();
+await sleep(10);
+check("S11 主题：点选 light 同步生效并持久化", document.documentElement.dataset.theme === "light" && storage.get("frpdesk.theme") === "light");
+await openSettingsForTest();
+themeOption("system").click();
+await sleep(10);
+check(
+  "S11 主题：点选 system 回到跟随系统（移除 data-theme）",
+  document.documentElement.dataset.theme === undefined && storage.get("frpdesk.theme") === "system" && themeOption("system").getAttribute("aria-checked") === "true",
+  `theme=${document.documentElement.dataset.theme} store=${storage.get("frpdesk.theme")}`,
+);
+
+// 开机自启动：点选开关 → SetLaunchAtLogin(true) → 开关保持弹层打开且为真实状态
+await openSettingsForTest();
+launchSwitch().checked = true;
+launchSwitch().dispatchEvent({ type: "change", bubbles: true });
+await sleep(20);
+check(
+  "S11 自启动：开启写入后开关为真实状态且弹层保持打开",
+  appStub.calls.filter((c) => c.name === "SetLaunchAtLogin").at(-1)?.args?.[0] === true &&
+    launchSwitch().checked === true &&
+    launchSwitch().disabled === false &&
+    settingsMenu().classList.contains("is-open"),
+  `checked=${launchSwitch().checked} disabled=${launchSwitch().disabled}`,
+);
+// 再点关闭：同路生效
+launchSwitch().checked = false;
+launchSwitch().dispatchEvent({ type: "change", bubbles: true });
+await sleep(20);
+check("S11 自启动：关闭写入后开关为真实状态", appStub.calls.filter((c) => c.name === "SetLaunchAtLogin").at(-1)?.args?.[0] === false && launchSwitch().checked === false);
+
+// 写入失败：开关回滚到点击前状态并可见错误提示
+appStub.launchState = { supported: true, enabled: false };
+appStub.results.SetLaunchAtLogin = "reject";
+await openSettingsForTest();
+launchSwitch().checked = true;
+launchSwitch().dispatchEvent({ type: "change", bubbles: true });
+await sleep(20);
+check(
+  "S11 自启动：失败回滚开关并可见提示",
+  launchSwitch().checked === false && launchSwitch().disabled === false && lastToast().includes("开机自启动设置失败"),
+  `checked=${launchSwitch().checked} toast=${lastToast()}`,
+);
+delete appStub.results.SetLaunchAtLogin;
+
+// unsupported（dev 版）：开关禁用 + 提示行换降级文案（下次打开重新拉取后仍然禁用）
+appStub.launchState = { supported: false, enabled: false };
+await openSettingsForTest();
+check(
+  "S11 自启动：unsupported 时开关禁用并换提示",
+  launchSwitch().disabled === true && launchSwitch().checked === false && launchHint().textContent.includes("暂不支持开机自启动"),
+  `disabled=${launchSwitch().disabled} hint=${launchHint().textContent}`,
+);
+// 状态读取失败：可见提示并禁用开关（避免基于未知状态误操作）
+appStub.launchState = { supported: true, enabled: false };
+appStub.results.LaunchAtLogin = "reject";
+await openSettingsForTest();
+check(
+  "S11 自启动：读取失败可见提示并禁用开关",
+  launchSwitch().disabled === true && lastToast().includes("读取开机自启动状态失败"),
+  `disabled=${launchSwitch().disabled} toast=${lastToast()}`,
+);
+delete appStub.results.LaunchAtLogin;
+
+// 延迟读取竞争：慢读在途时关闭再打开触发新读，随后用户写入；慢读携带的过期
+// 载荷返回时必须被丢弃（不覆盖写后的新状态、不弹提示、不记错误日志）。
+appStub.launchState = { supported: true, enabled: false };
+let releaseSlowRead;
+appStub.results.LaunchAtLogin = {
+  __pending: new Promise((r) => (releaseSlowRead = r)),
+  __payload: { supported: true, enabled: false }, // 陈旧载荷：写后返回若被采用会把开关拨回 false
+};
+await openSettingsForTest(); // 慢读发起（在途，开关禁用中）
+check("S11 自启动：慢读在途时开关禁用（读取中标记）", launchSwitch().disabled === true, `disabled=${launchSwitch().disabled}`);
+await openSettingsForTest(); // 关→开触发新读（首次挂起已消费，新读立即返回真实状态）
+check(
+  "S11 自启动：新读落地后开关可用（旧读仍在途）",
+  launchSwitch().disabled === false && launchSwitch().checked === false,
+  `disabled=${launchSwitch().disabled} checked=${launchSwitch().checked}`,
+);
+// 用户写入：开启
+launchSwitch().checked = true;
+launchSwitch().dispatchEvent({ type: "change", bubbles: true });
+await sleep(20);
+check(
+  "S11 自启动：写入落地后开关为开启",
+  appStub.calls.filter((c) => c.name === "SetLaunchAtLogin").at(-1)?.args?.[0] === true && launchSwitch().checked === true,
+  `checked=${launchSwitch().checked}`,
+);
+// 释放慢读：过期结果必须丢弃（checked 保持 true，不弹错误提示，不记错误日志）
+const logCallsBeforeStale = appStub.calls.filter((c) => c.name === "FrontendLog").length;
+releaseSlowRead();
+await sleep(20);
+check(
+  "S11 自启动：过期慢读不覆盖写后状态也不弹提示",
+  launchSwitch().checked === true &&
+    launchSwitch().disabled === false &&
+    appStub.calls.filter((c) => c.name === "FrontendLog").length === logCallsBeforeStale,
+  `checked=${launchSwitch().checked} disabled=${launchSwitch().disabled} logDelta=${appStub.calls.filter((c) => c.name === "FrontendLog").length - logCallsBeforeStale}`,
+);
+delete appStub.results.LaunchAtLogin;
+settingsBtn().click(); // 收起弹层，还原现场
+await sleep(180);
 
 // ---------- S10a：system 采用后端 resolved（不自行判定） ----------
 // system 偏好保留：首启/无偏好仍由后端解析系统语言；菜单「自动」项可随时回到该模式

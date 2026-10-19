@@ -12,7 +12,7 @@
   </head>
   <body>
     <div class="app">
-      <!-- ===== 顶栏（拖拽区）：左侧标题/更新入口 + 右侧 检查更新/语言/主题 ===== -->
+      <!-- ===== 顶栏（拖拽区）：左侧标题/更新入口 + 右侧 检查更新/设置（齿轮） ===== -->
       <header class="titlebar">
         <div class="titlebar-left">
           <span id="app-version" class="app-version" data-i18n-title="app.versionTip"></span>
@@ -22,20 +22,37 @@
           <button id="btn-check-update" class="btn btn-icon btn-ghost no-drag" type="button" data-i18n-title="update.check" data-i18n-aria="update.check">
             <svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
           </button>
-          <!-- 语言入口：图标按钮 + 三选一弹层（自动 / 简体中文 / 英语），不再用文字态表达状态 -->
-          <div class="lang-pick-wrap no-drag">
-            <button id="btn-lang" class="btn btn-icon btn-ghost no-drag" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-aria="lang.aria">
-              <svg class="icon" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+          <!-- 设置入口：齿轮打开轻量弹层（语言/主题/开机自启动），替换原语言+主题两枚按钮；
+               检查更新保持独立 -->
+          <div class="settings-pick-wrap no-drag">
+            <button id="btn-settings" class="btn btn-icon btn-ghost no-drag" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="settings.title" data-i18n-aria="settings.title">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
-            <div class="lang-menu" id="lang-menu" role="menu" hidden data-i18n-aria="lang.aria">
-              <button class="lang-option" type="button" role="menuitemradio" aria-checked="false" data-lang-pref="system" data-i18n="lang.optionSystem">自动</button>
-              <button class="lang-option" type="button" role="menuitemradio" aria-checked="false" data-lang-pref="zh-CN" data-i18n="lang.optionZh">简体中文</button>
-              <button class="lang-option" type="button" role="menuitemradio" aria-checked="false" data-lang-pref="en" data-i18n="lang.optionEn">英语</button>
+            <div class="settings-menu" id="settings-menu" role="menu" hidden data-i18n-aria="settings.title">
+              <!-- 语言三选一：system 偏好后端权威解析；点选即生效并关闭弹层 -->
+              <div class="settings-group" role="group">
+                <div class="settings-group-label" data-i18n="settings.language">语言</div>
+                <button class="settings-option lang-option" type="button" role="menuitemradio" aria-checked="false" data-lang-pref="system" data-i18n="lang.optionSystem">自动</button>
+                <button class="settings-option lang-option" type="button" role="menuitemradio" aria-checked="false" data-lang-pref="zh-CN" data-i18n="lang.optionZh">简体中文</button>
+                <button class="settings-option lang-option" type="button" role="menuitemradio" aria-checked="false" data-lang-pref="en" data-i18n="lang.optionEn">英语</button>
+              </div>
+              <!-- 主题三选一：沿用既有 localStorage 持久化语义；点选即生效并关闭弹层 -->
+              <div class="settings-group" role="group">
+                <div class="settings-group-label" data-i18n="settings.theme">主题</div>
+                <button class="settings-option theme-option" type="button" role="menuitemradio" aria-checked="false" data-theme-pref="system" data-i18n="theme.system">跟随系统</button>
+                <button class="settings-option theme-option" type="button" role="menuitemradio" aria-checked="false" data-theme-pref="light" data-i18n="theme.light">浅色</button>
+                <button class="settings-option theme-option" type="button" role="menuitemradio" aria-checked="false" data-theme-pref="dark" data-i18n="theme.dark">深色</button>
+              </div>
+              <!-- 开机自启动：真实系统注册状态（后端权威）；开关保持弹层打开，小字说明 -->
+              <div class="settings-group settings-group--launch">
+                <label class="settings-switch-row" for="launch-at-login">
+                  <span data-i18n="settings.launchAtLogin">开机自启动</span>
+                  <input type="checkbox" class="switch" id="launch-at-login" role="switch" />
+                </label>
+                <p class="settings-hint" id="settings-launch-hint" data-i18n="settings.launchHint">登录电脑后自动运行 Frpdesk</p>
+              </div>
             </div>
           </div>
-          <button id="btn-theme" class="btn btn-icon btn-ghost no-drag" type="button" title="主题：跟随系统" aria-label="切换主题" data-theme-mode="system">
-            <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-          </button>
         </div>
       </header>
 

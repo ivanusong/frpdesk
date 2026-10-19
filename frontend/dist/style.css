@@ -265,20 +265,21 @@ body {
   justify-content: center;
 }
 
-/* 语言入口：图标按钮（与检查更新/主题同为 30px ghost icon）外层包裹层，锚定弹层 */
-.lang-pick-wrap {
+/* 设置入口：齿轮图标按钮（与检查更新同为 30px ghost icon）外层包裹层，锚定弹层 */
+.settings-pick-wrap {
   position: relative;
   display: inline-flex;
 }
 
-/* 语言弹层：锚定按钮下方右对齐的小型 popover（非全屏 modal）；
-   风格与图标 popover 一致：surface/border/shadow + 轻微淡入 */
-.lang-menu {
+/* 设置弹层：锚定按钮下方右对齐的小型 popover（非全屏 modal）；
+   风格与图标 popover 一致：surface/border/shadow + 轻微淡入。
+   内部分组：语言三选一 / 主题三选一 / 开机自启动开关。 */
+.settings-menu {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
   z-index: 20;
-  min-width: 152px;
+  min-width: 220px;
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -295,13 +296,34 @@ body {
     transform 140ms var(--ease-out);
 }
 
-.lang-menu.is-open {
+.settings-menu.is-open {
   opacity: 1;
   transform: none;
 }
 
-/* 菜单项：整行可点的单行语言名；选中态用主色 + 浅底（与图标网格同语义） */
-.lang-option {
+/* 分组：小标题 + 选项列表；组间细分隔线（同弹层视觉语言） */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-group + .settings-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-group-label {
+  padding: 6px 9px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+}
+
+/* 选项：整行可点的单行文案（语言名/主题名）；选中态用主色 + 浅底（与图标网格同语义） */
+.settings-option {
   appearance: none;
   width: 100%;
   padding: 6px 9px;
@@ -318,20 +340,55 @@ body {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .lang-option:hover {
+  .settings-option:hover {
     background: var(--surface-2);
   }
 }
 
-.lang-option.is-active {
+.settings-option.is-active {
   background: var(--primary-soft);
   color: var(--primary);
   font-weight: 600;
 }
 
-.lang-option:focus-visible {
+.settings-option:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
+}
+
+/* 开机自启动行：左侧标题右侧开关（与服务器 HTTP 能力开关同布局语义） */
+.settings-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.settings-switch-row .switch {
+  flex-shrink: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .settings-switch-row:hover .switch:not(:disabled) {
+    background: color-mix(in srgb, var(--surface-3) 70%, var(--text-3));
+  }
+
+  .settings-switch-row:hover .switch:not(:disabled):checked {
+    background: var(--primary-hover);
+  }
+}
+
+/* 开机自启动小字说明（unsupported/dev 场景由 JS 换为降级提示） */
+.settings-hint {
+  margin: 0 9px 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-3);
 }
 
 /* ghost 变体：无边框透明底（titlebar 内图标按钮），hover 浅底 */
@@ -2548,7 +2605,7 @@ button.service-icon:focus-visible {
   }
 
   .icon-popover,
-  .lang-menu {
+  .settings-menu {
     transform: none;
     transition: opacity 140ms linear;
   }

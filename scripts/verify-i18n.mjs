@@ -148,26 +148,26 @@ check(
   "日志归属固定 System（渲染不用词典 key）",
   mainSrc.includes('e.serverName || "System"') && !mainSrc.includes('t("log.system")'),
 );
-// 语言入口契约：图标按钮 + 三选一菜单（system/zh-CN/en，允许回到自动），无两态取反切换
+// 语言入口契约：齿轮设置弹层内三选一（system/zh-CN/en，允许回到自动），无两态取反切换
 const langPrefs = [...html.matchAll(/data-lang-pref="([^"]+)"/g)].map((m) => m[1]);
 check(
-  "语言入口为图标按钮 + 三选一菜单（system/zh-CN/en，可回到自动）",
-  html.includes('id="lang-menu"') &&
+  "语言入口在设置弹层内三选一（system/zh-CN/en，可回到自动）",
+  html.includes('id="settings-menu"') &&
     html.includes('aria-haspopup="menu"') &&
     html.includes('role="menuitemradio"') &&
     langPrefs.join(",") === "system,zh-CN,en" &&
-    mainSrc.includes("setLanguagePref(opt.dataset.langPref)") &&
+    mainSrc.includes("setLanguagePref(langOpt.dataset.langPref)") &&
     !mainSrc.includes('currentLang() === "zh-CN" ? "en" : "zh-CN"') &&
     !mainSrc.includes("LANG_ORDER"),
   `prefs=${langPrefs.join(",")}`,
 );
-// 语言按钮保持静态图标：切语言只刷新 title/aria，不重写按钮内容（SVG 不变体）
+// 设置按钮保持静态图标：切语言只刷新 title/aria，不重写按钮内容（SVG 不变体）
 check(
-  "语言按钮为静态图标（切语言不重写按钮文本/图标）",
-  html.includes('id="btn-lang"') &&
+  "设置按钮为静态图标（切语言不重写按钮文本/图标）",
+  html.includes('id="btn-settings"') &&
     html.includes('aria-haspopup="menu"') &&
-    !mainSrc.includes('$("btn-lang").textContent') &&
-    !mainSrc.includes('$("btn-lang").innerHTML'),
+    !mainSrc.includes('$("btn-settings").textContent') &&
+    !mainSrc.includes('$("btn-settings").innerHTML'),
 );
 
 // 语言菜单为三行纯语言名：无 code 括号、无「跟随系统」后缀、无 system 副文本节点/key

@@ -7,8 +7,8 @@
 //   - 用户名字、地址、服务名等技术数据不翻译；
 //   - 运行日志（日志面板/更新/清理等后端环形日志）与诊断通道（FrontendLog）
 //     固定英文，不随界面语言翻译；
-//   - 语言：首启/无偏好由 system 自动解析系统语言（后端权威）；顶栏语言图标
-//     打开三选一弹层（自动 system / 简体中文 zh-CN / 英语 en），选择持久化显式
+//   - 语言：首启/无偏好由 system 自动解析系统语言（后端权威）；顶栏齿轮设置
+//     弹层内三选一（自动 system / 简体中文 zh-CN / 英语 en），选择持久化显式
 //     偏好，选「自动」可随时回到 system。持久化在 localStorage（旧 key
 //     frpcc.language 只读回退），并与后端 config.json 的 language 字段保持
 //     一致（后端负责托盘/后端消息语言）。
@@ -68,20 +68,29 @@ export const DICT = {
   "update.notesAria": { zh: "更新日志", en: "Release notes" },
   "update.unknownReason": { zh: "未知错误", en: "unknown error" },
 
-  // ---- 主题与语言 ----
-  "theme.title": { zh: "主题：{0}", en: "Theme: {0}" },
+  // ---- 主题与语言（顶栏齿轮弹层内的两组三选一） ----
   "theme.system": { zh: "跟随系统", en: "System" },
   "theme.light": { zh: "浅色", en: "Light" },
   "theme.dark": { zh: "深色", en: "Dark" },
-  "theme.aria": { zh: "切换主题", en: "Switch theme" },
-  // 语言入口：图标按钮打开三选一弹层（自动 system / 简体中文 / 英语），
-  // 菜单仅三行纯语言名，当前配置由选中态表达；文案/aria 全部走词典
-  "lang.title": { zh: "界面语言：{0}", en: "Interface language: {0}" },
-  "lang.aria": { zh: "选择界面语言", en: "Choose interface language" },
+  // 语言入口：齿轮设置弹层内三选一（自动 system / 简体中文 zh-CN / 英语 en），
+  // 当前配置由选中态表达；文案/aria 全部走词典
   "lang.optionSystem": { zh: "自动", en: "Auto" },
   "lang.optionZh": { zh: "简体中文", en: "Simplified Chinese" },
   "lang.optionEn": { zh: "英语", en: "English" },
   "lang.syncFail": { zh: "语言偏好未保存：{0}", en: "Language preference was not saved: {0}" },
+
+  // ---- 设置弹层（齿轮：语言/主题/开机自启动；点选即时生效，无保存取消） ----
+  "settings.title": { zh: "应用设置", en: "App settings" },
+  "settings.language": { zh: "语言", en: "Language" },
+  "settings.theme": { zh: "主题", en: "Theme" },
+  "settings.launchAtLogin": { zh: "开机自启动", en: "Launch at login" },
+  "settings.launchHint": { zh: "登录电脑后自动运行 Frpdesk", en: "Run Frpdesk automatically after signing in" },
+  "settings.launchHintDev": {
+    zh: "开发版（版本号未注入）暂不支持开机自启动",
+    en: "Launch at login is unavailable in development builds",
+  },
+  "settings.launchFail": { zh: "开机自启动设置失败：{0}", en: "Failed to update launch at login: {0}" },
+  "settings.launchReadFail": { zh: "读取开机自启动状态失败：{0}", en: "Failed to read the launch-at-login state: {0}" },
 
   // ---- Tab 与工具行 ----
   "tab.aria": { zh: "功能面板", en: "Panels" },

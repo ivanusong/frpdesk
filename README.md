@@ -6,6 +6,8 @@ English | [简体中文](README_zh-CN.md)
 
 Frpdesk is a desktop client for [frp](https://github.com/fatedier/frp). Expose local websites, APIs, and TCP/UDP services through a graphical interface, without writing client configuration files or running frpc separately.
 
+![screenshot](./assets/screenshot.png)
+
 ## Features
 
 - HTTP, TCP, and UDP tunnels

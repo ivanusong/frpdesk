@@ -166,6 +166,36 @@ func TestSetLanguagePersistsAndApplies(t *testing.T) {
 	}
 }
 
+// TestLaunchAtLoginRPCDevGate 开机自启动绑定（dev 版门禁）：go test 下版本号未注入，
+// 查询恒返回 Supported=false 且不触碰系统；写入被拒绝并返回错误（前端据此恢复开关）。
+// 真实注册/注销/失败/路径含空格等系统行为由 internal/autostart 包内测试以隔离目录覆盖。
+func TestLaunchAtLoginRPCDevGate(t *testing.T) {
+	if !isDevBuild() {
+		t.Fatalf("测试环境版本号应为 dev（未注入），得到 %q", currentVersion)
+	}
+	svc := newTestAppService(t)
+
+	st, err := svc.LaunchAtLogin()
+	if err != nil {
+		t.Fatalf("LaunchAtLogin: %v", err)
+	}
+	if st.Supported || st.Enabled {
+		t.Fatalf("dev 版应返回不可用且未开启: %+v", st)
+	}
+
+	st, err = svc.SetLaunchAtLogin(true)
+	if err == nil {
+		t.Fatal("dev 版注册开机自启动应返回错误")
+	}
+	if st.Supported || st.Enabled {
+		t.Fatalf("dev 版失败返回值应保持不可用且未开启: %+v", st)
+	}
+	// 失败消息应为当前语言（zh）且可读，绝不静默假装成功
+	if msg := err.Error(); !strings.Contains(msg, "开机自启动") {
+		t.Fatalf("错误消息应包含开机自启动说明: %q", msg)
+	}
+}
+
 // TestReorderServicesRPC 排序绑定：按给定顺序重排并落盘；缺 ID/重复/未知 ID 拒绝；
 // 排序仅动配置数组顺序——不 reconcile，不触发任何实例对齐（状态保持 stopped）。
 func TestReorderServicesRPC(t *testing.T) {
