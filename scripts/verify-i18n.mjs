@@ -183,7 +183,7 @@ check(
     !html.includes("lang-system-note"),
 );
 
-// ---------- 9) README：语言内容彻底移除（双语说明/互链/verify-i18n 命令均不再出现） ----------
+// ---------- 9) README：保留顶部语言导航，且不出现 verify-i18n 命令 ----------
 const readmeEn = readFileSync(join(ROOT, "README.md"), "utf8");
 const readmeZh = readFileSync(join(ROOT, "README_zh-CN.md"), "utf8");
 check(
@@ -196,9 +196,9 @@ check(
     !readmeZh.includes("简体中文 / 英文界面"),
 );
 check(
-  "README 不再有双语 README 互链与 verify-i18n 命令",
-  !readmeEn.includes("README_zh-CN.md") &&
-    !readmeZh.includes("[English](README.md)") &&
+  "README 语言导航存在且无 verify-i18n 命令",
+  readmeEn.startsWith("English | [简体中文](README_zh-CN.md)") &&
+    readmeZh.startsWith("[English](README.md) | 简体中文") &&
     !readmeEn.includes("verify-i18n") &&
     !readmeZh.includes("verify-i18n"),
 );
