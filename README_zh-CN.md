@@ -36,49 +36,28 @@ Linux 包面向 Ubuntu 24.04 或兼容的桌面系统，需要 GTK 4 与 WebKitG
 
 ## 服务端准备（FRPS）
 
-Frpdesk 只是客户端，仍需一台可用的 [frps](https://github.com/fatedier/frp) 服务器。建议使用较新版本；Frpdesk 内置的 frp 客户端为 v0.71.0，服务端版本应不低于该版本。
+Frpdesk 只是客户端，仍需一台可用的 [frps](https://github.com/fatedier/frp) 服务器。Frpdesk 内置的 frp 客户端为 v0.71.0，服务端版本应不低于该版本。
 
-推荐的最小 `frps.toml`：
+如果你有自己的服务器和域名，直接使用 [`server/`](server) 目录里现成的 Docker Compose 方案：frps 跑在 Traefik 后面，由 Traefik 自动签发并续期泛域名证书。你只需要改一个 `.env` 文件，然后执行 `docker compose up -d`。详细步骤见 [用 Docker Compose 部署服务端](docs/server_zh-CN.md)。
+
+如果 frps 地址是别人给你的，跳过本节，直接看下面的「快速使用」。
+
+想自己跑 frps 而不用 Docker 时，最小配置只需四项。把 `vhostHTTPPort` 设成与 `bindPort` 相同，一个端口即可同时服务客户端控制连接与 HTTP 入口：
 
 ```toml
+# frps.toml
 bindAddr = "0.0.0.0"
-bindPort = 7000                 # 对应应用中的「服务器端口」
+bindPort = 7000                       # 对应应用中的「服务器端口」
 
 auth.method = "token"
 auth.token = "a-long-random-secret"   # 对应应用中的「鉴权 Token」
 
-# HTTP 隧道的子域名入口，仅在启用「支持 HTTP 域名」时需要
-vhostHTTPPort = 80
-subDomainHost = "example.com"   # 对应应用中的「根域名」，不带 "*."
-
-# TCP/UDP 服务可占用的服务端端口范围，覆盖你计划使用的远程端口
-allowPorts = [
-  { start = 2000, end = 3000 },
-  { single = 3001 },
-  { start = 4000, end = 50000 },
-]
+# 仅 HTTP 隧道需要；只用 TCP/UDP 服务时这两行可以去掉
+vhostHTTPPort = 7000                  # 与 bindPort 相同
+subDomainHost = "example.com"         # 对应应用中的「根域名」，不带 "*."
 ```
 
-随后把泛域名解析 `*.example.com` 指向该服务器的公网 IP，并放通防火墙中的 `bindPort`、`vhostHTTPPort` 以及 `allowPorts` 内的所有远程端口。
-
-应用内服务器表单与 FRPS 配置的对应关系：
-
-- **服务器地址 / 端口 / 鉴权 Token** 分别对应 `bindAddr` 的可达地址、`bindPort`、`auth.token`。Frpdesk 固定使用 token 鉴权方式，Token 留空只在服务端未配置 token 时才能连上。
-- **根域名** 必须与 `subDomainHost` 一致，且不带 `*.` 前缀。
-- **访问协议 / 访问端口** 只描述对外展示的访问地址，不会为 FRPS 开启 TLS，也不会启用 `vhostHTTPPort` 或 `vhostHTTPSPort`。FRPS 直接对外提供 `vhostHTTPPort` 时选 `http` 并填写该端口；FRPS 位于反向代理或网关之后、由它终结 HTTPS 时，按实际公开入口选 `https` 和公开端口。
-- Frpdesk 默认启用客户端 TLS，控制连接无需服务端证书；若要拒绝明文连接，在服务端设置 `transport.tls.force = true`。
-- `allowPorts` 可选但建议配置：配置后，TCP/UDP 服务的远程端口超出范围或已被其它代理占用时会注册失败；未配置时任意非保留端口均可使用。
-
-可选的 Dashboard（Frpdesk 不依赖）：
-
-```toml
-webServer.addr = "127.0.0.1"
-webServer.port = 7500
-webServer.user = "admin"
-webServer.password = "another-secret"
-```
-
-完整配置项见 [frps 参考配置](https://github.com/fatedier/frp/blob/dev/conf/frps_full_example.toml)。
+防火墙放通 `bindPort` 与每个 TCP/UDP 服务的远程端口，并把泛域名 `*.example.com` 解析到服务器公网 IP。这样只提供 `http://` 访问；frps 自身无法为 HTTP 隧道终结 TLS，要 `https://` 请使用上面的 Compose 方案。
 
 ## 快速使用
 

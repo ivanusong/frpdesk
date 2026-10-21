@@ -1,0 +1,23 @@
+# Rendered by frps itself from environment variables (Go text/template), so this
+# file never needs editing. Values come from .env, injected by docker compose.
+# See https://gofrp.org/en/docs/features/common/configure
+
+bindAddr = "0.0.0.0"
+
+# The control connection and the HTTP tunnel entry share this one port:
+# frps multiplexes them when vhostHTTPPort equals bindPort.
+bindPort = {{ .Envs.FRPS_BIND_PORT }}
+vhostHTTPPort = {{ .Envs.FRPS_BIND_PORT }}
+
+auth.method = "token"
+auth.token = "{{ .Envs.FRPS_TOKEN }}"
+
+# Subdomains served over HTTP: <subdomain>.<FRPS_DOMAIN>
+subDomainHost = "{{ .Envs.FRPS_DOMAIN }}"
+
+# Frpdesk always connects over TLS, so reject plaintext control connections.
+transport.tls.force = true
+
+# Let the backend decide timeouts, so SSE, streaming and large uploads are not
+# cut off by the 60s vhost default.
+vhostHTTPTimeout = -1

@@ -24,3 +24,8 @@ node_modules/
 # 编辑器
 .idea/
 .vscode/
+
+# 服务端部署：本地密钥与证书，绝不入库
+server/.env
+server/letsencrypt/*
+!server/letsencrypt/.gitkeep

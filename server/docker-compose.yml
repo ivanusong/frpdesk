@@ -1,0 +1,67 @@
+# Frpdesk server: frps plus Traefik for automatic HTTPS.
+# Usage: copy .env.example to .env, fill it in, then `docker compose up -d`.
+# No other file needs editing.
+
+services:
+  frps:
+    image: snowdreamtech/frps:0.71.0-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - FRPS_BIND_PORT=${FRPS_BIND_PORT:-7000}
+      # Fail fast with a clear message instead of starting without auth.
+      - FRPS_TOKEN=${FRPS_TOKEN:?set FRPS_TOKEN in .env, e.g. openssl rand -hex 32}
+    volumes:
+      - ./frps.toml:/etc/frp/frps.toml:ro
+    ports:
+      # Control connection from Frpdesk and HTTP tunnel entry (same port).
+      - "${FRPS_BIND_PORT:-7000}:${FRPS_BIND_PORT:-7000}"
+      # Ports available to TCP/UDP services.
+      - "${FRPS_REMOTE_PORTS:-20000-20099}:${FRPS_REMOTE_PORTS:-20000-20099}"
+      - "${FRPS_REMOTE_PORTS:-20000-20099}:${FRPS_REMOTE_PORTS:-20000-20099}/udp"
+    labels:
+      - traefik.enable=true
+      # Any subdomain of FRPS_DOMAIN, served over HTTPS with an auto-issued
+      # wildcard certificate. HostRegexp works on every Traefik v3 release;
+      # 3.7+ also allows the shorter Host(`*.${FRPS_DOMAIN}`).
+      - traefik.http.routers.frpdesk.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.${FRPS_DOMAIN:?set FRPS_DOMAIN in .env}`)
+      - traefik.http.routers.frpdesk.entrypoints=websecure
+      - traefik.http.routers.frpdesk.service=frpdesk
+      - traefik.http.routers.frpdesk.tls=true
+      - traefik.http.routers.frpdesk.tls.certresolver=letsencrypt
+      - traefik.http.routers.frpdesk.tls.domains[0].main=${FRPS_DOMAIN}
+      - traefik.http.routers.frpdesk.tls.domains[0].sans=*.${FRPS_DOMAIN}
+      # Forward to frps with the original Host header, which frps routes on.
+      - traefik.http.services.frpdesk.loadbalancer.server.port=${FRPS_BIND_PORT:-7000}
+      - traefik.http.services.frpdesk.loadbalancer.passhostheader=true
+  traefik:
+    image: traefik:v3.7
+    restart: unless-stopped
+    env_file: .env
+    command:
+      # Static configuration is passed as flags so every value can come from .env.
+      # certificatesResolvers belongs here, not in a dynamic config file.
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      # No read/write cap, so streaming responses and long uploads survive.
+      - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=0s
+      - --entrypoints.websecure.transport.respondingtimeouts.writetimeout=0s
+      - --entrypoints.websecure.transport.respondingtimeouts.idletimeout=300s
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?set ACME_EMAIL in .env}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=${DNS_PROVIDER:?set DNS_PROVIDER in .env}
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=${ACME_DELAY_BEFORE_CHECK:-30}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Traefik reads container labels to build its routes.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    depends_on:
+      frps:
+        condition: service_started

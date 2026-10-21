@@ -36,49 +36,28 @@ Linux packages target Ubuntu 24.04 or compatible desktop systems and require GTK
 
 ## Server Setup (FRPS)
 
-Frpdesk is a client only; you still need a running [frps](https://github.com/fatedier/frp) server. Use a recent frps release; Frpdesk embeds frp v0.71.0 as its client, so the server should be that version or newer.
+Frpdesk is a client only; you still need a running [frps](https://github.com/fatedier/frp) server. Frpdesk embeds frp v0.71.0 as its client, so the server should be that version or newer.
 
-Recommended minimal `frps.toml`:
+If you have your own server and domain, deploy the ready-made Docker Compose stack in [`server/`](server): it runs frps behind Traefik, which issues and renews a wildcard TLS certificate automatically. You edit a single `.env` file and run `docker compose up -d`. Step-by-step instructions are in [Server Deployment with Docker Compose](docs/server.md).
+
+If someone else gave you the frps address, skip this section and go straight to the Quick Start below.
+
+To run frps yourself without Docker, the minimum is four settings. Setting `vhostHTTPPort` equal to `bindPort` lets one port serve both the client control connection and the HTTP entry:
 
 ```toml
+# frps.toml
 bindAddr = "0.0.0.0"
-bindPort = 7000                 # Server port in Frpdesk
+bindPort = 7000                       # Server port in Frpdesk
 
 auth.method = "token"
 auth.token = "a-long-random-secret"   # Auth token in Frpdesk
 
-# HTTP tunnels: subdomain entry. Required only if you enable HTTP domains.
-vhostHTTPPort = 80
-subDomainHost = "example.com"   # Base domain in Frpdesk (no "*." prefix)
-
-# Ports TCP/UDP services may occupy on the server. Cover the remote ports you plan to use.
-allowPorts = [
-  { start = 2000, end = 3000 },
-  { single = 3001 },
-  { start = 4000, end = 50000 },
-]
+# HTTP tunnels only; drop both lines for TCP/UDP-only setups
+vhostHTTPPort = 7000                  # same as bindPort
+subDomainHost = "example.com"         # Base domain in Frpdesk (no "*." prefix)
 ```
 
-Then point a wildcard DNS record at the server so `*.example.com` resolves to its public IP, and open the firewall for `bindPort`, `vhostHTTPPort`, and every remote port in `allowPorts`.
-
-Notes on how the Frpdesk server form maps to FRPS:
-
-- **Server address / port / auth token** are `bindAddr` reachability, `bindPort`, and `auth.token`. Frpdesk always authenticates with the token method; leaving the token empty only works if FRPS has no token configured.
-- **Base domain** must equal `subDomainHost`, without the `*.` prefix.
-- **Access scheme / port** only describe the public URL shown in the app; they do not enable TLS on FRPS and do not turn on `vhostHTTPPort` or `vhostHTTPSPort`. If FRPS serves `vhostHTTPPort` directly, choose `http` and that port; if FRPS sits behind a reverse proxy or gateway that terminates HTTPS, choose `https` and the public port of that entry.
-- Frpdesk enables client-side TLS by default, so FRPS needs no certificate for the control connection. To reject plaintext connections, set `transport.tls.force = true` on the server.
-- `allowPorts` is optional but recommended; with it set, a TCP/UDP service fails to register when its remote port falls outside the range or is already taken by another proxy. Without `allowPorts`, any non-reserved port can be used.
-
-Optional dashboard (not required by Frpdesk):
-
-```toml
-webServer.addr = "127.0.0.1"
-webServer.port = 7500
-webServer.user = "admin"
-webServer.password = "another-secret"
-```
-
-See the [frps reference configuration](https://github.com/fatedier/frp/blob/dev/conf/frps_full_example.toml) for the full option list.
+Open `bindPort` in the firewall, plus the remote port of each TCP/UDP service, and point a wildcard DNS record `*.example.com` at the server IP. This setup serves `http://` only; for `https://` use the Compose stack above, since frps cannot terminate TLS for HTTP tunnels itself.
 
 ## Quick Start
 
