@@ -38,7 +38,7 @@ Linux 包面向 Ubuntu 24.04 或兼容的桌面系统，需要 GTK 4 与 WebKitG
 
 Frpdesk 只是客户端，仍需一台可用的 [frps](https://github.com/fatedier/frp) 服务器。Frpdesk 内置的 frp 客户端为 v0.71.0，服务端版本应不低于该版本。
 
-如果你有自己的服务器和域名，直接使用 [`server/`](server) 目录里现成的 Docker Compose 方案：frps 跑在 Traefik 后面，由 Traefik 自动签发并续期泛域名证书。你只需要改一个 `.env` 文件，然后执行 `docker compose up -d`。详细步骤见 [用 Docker Compose 部署服务端](docs/server_zh-CN.md)。
+如果你有自己的服务器和域名，直接使用 [`server/`](server) 目录里现成的 Docker Compose 方案：frps 跑在 Traefik 后面，由 Traefik 自动签发并续期泛域名证书。你只需要改一个 `.env` 文件，然后执行 `docker compose up -d`。详细步骤见 [用 Docker Compose 部署服务端](docs/server_zh-CN.md)。也可以交给 AI 编码助手，一句话：「读取 [skills/frps-setup/SKILL.md](skills/frps-setup/SKILL.md)，帮我部署 Frpdesk 服务端。」
 
 如果 frps 地址是别人给你的，跳过本节，直接看下面的「快速使用」。
 

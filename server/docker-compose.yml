@@ -22,9 +22,9 @@ services:
     labels:
       - traefik.enable=true
       # Any subdomain of FRPS_DOMAIN, served over HTTPS with an auto-issued
-      # wildcard certificate. HostRegexp works on every Traefik v3 release;
-      # 3.7+ also allows the shorter Host(`*.${FRPS_DOMAIN}`).
-      - traefik.http.routers.frpdesk.rule=HostRegexp(`{subdomain:[a-z0-9-]+}.${FRPS_DOMAIN:?set FRPS_DOMAIN in .env}`)
+      # wildcard certificate. Wildcard Host matching needs Traefik 3.7+ (v3
+      # rule syntax); this template pins traefik:v3.7.
+      - traefik.http.routers.frpdesk.rule=Host(`*.${FRPS_DOMAIN:?set FRPS_DOMAIN in .env}`)
       - traefik.http.routers.frpdesk.entrypoints=websecure
       - traefik.http.routers.frpdesk.service=frpdesk
       - traefik.http.routers.frpdesk.tls=true

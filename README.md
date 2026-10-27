@@ -38,7 +38,7 @@ Linux packages target Ubuntu 24.04 or compatible desktop systems and require GTK
 
 Frpdesk is a client only; you still need a running [frps](https://github.com/fatedier/frp) server. Frpdesk embeds frp v0.71.0 as its client, so the server should be that version or newer.
 
-If you have your own server and domain, deploy the ready-made Docker Compose stack in [`server/`](server): it runs frps behind Traefik, which issues and renews a wildcard TLS certificate automatically. You edit a single `.env` file and run `docker compose up -d`. Step-by-step instructions are in [Server Deployment with Docker Compose](docs/server.md).
+If you have your own server and domain, deploy the ready-made Docker Compose stack in [`server/`](server): it runs frps behind Traefik, which issues and renews a wildcard TLS certificate automatically. You edit a single `.env` file and run `docker compose up -d`. Step-by-step instructions are in [Server Deployment with Docker Compose](docs/server.md). For AI-assisted setup, ask your coding agent: "Read [skills/frps-setup/SKILL.md](skills/frps-setup/SKILL.md) and help me deploy the Frpdesk server."
 
 If someone else gave you the frps address, skip this section and go straight to the Quick Start below.
 
