@@ -133,6 +133,12 @@ class El {
     }
     el.parent = this;
     this.children.push(el);
+    // 动态挂载的带 id 节点进入 getElementById 索引（真实 DOM 全树可查）
+    const index = (n) => {
+      if (n.attrs.id) document._byId.set(n.attrs.id, n);
+      n.children.forEach(index);
+    };
+    index(el);
     return el;
   }
   remove() {
@@ -140,6 +146,12 @@ class El {
       const i = this.parent.children.indexOf(this);
       if (i >= 0) this.parent.children.splice(i, 1);
       this.parent = null;
+      // 同步索引：被移除的带 id 节点不再可查（防陈旧命中，与真实 DOM 一致）
+      const deindex = (n) => {
+        if (n.attrs.id && document._byId.get(n.attrs.id) === n) document._byId.delete(n.attrs.id);
+        n.children.forEach(deindex);
+      };
+      deindex(this);
     }
   }
   contains(el) {
@@ -182,8 +194,15 @@ class El {
     return this.querySelectorAll(sel)[0] ?? null;
   }
   querySelectorAll(sel) {
+    // 逗号选择器取并集（真实 CSS 语义）；"input, select" 不是后代组合器
     const out = [];
-    collectDescendants(this, sel, out);
+    for (const part of String(sel).split(",")) {
+      const s = part.trim();
+      if (!s) continue;
+      const found = [];
+      collectDescendants(this, s, found);
+      for (const el of found) if (!out.includes(el)) out.push(el);
+    }
     return out;
   }
   get elements() {
@@ -266,10 +285,12 @@ function matchCompound(el, sel) {
     } else if (p.startsWith("#")) {
       if (el.attrs.id !== p.slice(1)) return false;
     } else {
-      const am = p.slice(1, -1).match(/^([\w-]+)(?:="([^"]*)")?$/);
+      // 属性值允许双/单引号（真实 CSS 两种均合法；main.js 内部 closest 用单引号形态）
+      const am = p.slice(1, -1).match(/^([\w-]+)(?:="([^"]*)"|='([^']*)')?$/);
       if (!am) return false;
       const v = el.attrs[am[1]];
-      if (am[2] === undefined ? v === undefined : v !== am[2]) return false;
+      const want = am[2] !== undefined ? am[2] : am[3];
+      if (want === undefined ? v === undefined : v !== want) return false;
     }
   }
   return true;
@@ -351,7 +372,13 @@ document.createElement = (tag) => new El(tag);
 document.querySelector = (sel) => document.querySelectorAll(sel)[0] ?? null;
 document.querySelectorAll = (sel) => {
   const out = [];
-  docEl.children.forEach((c) => collectDescendants(c, sel, out));
+  for (const part of String(sel).split(",")) {
+    const s = part.trim();
+    if (!s) continue;
+    const found = [];
+    docEl.children.forEach((c) => collectDescendants(c, s, found));
+    for (const el of found) if (!out.includes(el)) out.push(el);
+  }
   return out;
 };
 
@@ -531,6 +558,11 @@ globalThis.__wailsApi = { AppService: appStub };
 // ---------- 加载 main.js（bindings import → 受控 stub；写临时模块后 import） ----------
 parseInto(html, docEl);
 docEl.children.forEach(indexTree);
+// document.body 重指向解析出的真实 <body>（解析树为 docEl > html > body，docEl 下
+// 另有解析前的空占位 body）：setBgInert 的「body 顶层子元素」遍历、confirm 浮层挂载
+// 等与真实 DOM 同构（.app/各模态/浮层均为 body 直接子元素）
+const parsedHtmlEl = docEl.children.find((el) => el.tagName === "HTML");
+document.body = parsedHtmlEl?.children.find((el) => el.tagName === "BODY") ?? document.body;
 mainSrc = mainSrc.replace(
   'import * as api from "./bindings/frpdesk/index.js";',
   "const api = globalThis.__wailsApi;",
@@ -631,6 +663,7 @@ await sleep(20);
 check("已有配置但未选择：提示选择目标", lastToast().includes("请选择目标 Frps"));
 // 上次选择记忆：直接选 B 提交一次（走 stub），再打开应记住 B
 sel.value = "srvB";
+document.getElementById("service-form").elements.remotePort.value = "36001"; // 远程端口必填：提交前先给合法值
 document.getElementById("service-form").dispatchEvent({ type: "submit", bubbles: true });
 await sleep(20);
 T.openServiceModal("新增 TCP / UDP 服务", null, "tcp");
@@ -1849,7 +1882,7 @@ check(
   /\.field-title\s*\{[^}]*white-space:\s*nowrap/.test(css) &&
     /\.field-help\s*\{[^}]*color:\s*var\(--text-3\)/.test(css) &&
     /\.field-help\s*\{[^}]*transition:[^;]*transform\s+1[23]\dms/.test(css) &&
-    /\.field-help:hover\s*\{[^}]*color:\s*var\(--primary\)[^}]*transform:\s*scale\(1\.08\)/.test(css) &&
+    /\.field-help:hover\s*\{[^}]*color:\s*var\(--primary-text\)[^}]*transform:\s*scale\(1\.08\)/.test(css) &&
     /\.field-tip\s*\{[^}]*position:\s*fixed/.test(css) &&
     /\.field-tip\s*\{[^}]*max-width:\s*300px/.test(css) &&
     /\.field-tip\s*\{[^}]*border:\s*1px solid color-mix\([^;]*transparent\)/.test(css) &&
@@ -2071,6 +2104,309 @@ await sleep(200);
 check("S13 关闭模态：退出动画结束后隐藏", tipEl.hidden === true);
 await sleep(450); // 等模态退场定时器结束，不影响后续
 await T.setLanguagePref("zh-CN");
+
+// ---------- 收尾回归：本轮 UI/UX 修复的行为验证 ----------
+// A 空态入口 / B 整数端口 / C 字段错误 id 与 aria / D 原生 invalid 提示 /
+// E 重复提交防护与在途阻止关闭 / F 开关防重 / G 快照失败重试 / H setBgInert 嵌套恢复
+
+// ---------- A 空态入口：「先添加 Frps 配置」仅在没有任何 Frps 配置时显示 ----------
+const emptyBtn = () => document.getElementById("btn-empty-add-server");
+currentSnapshot = makeSnapshot({ servers: [], services: [] });
+await T.applySnapshot(currentSnapshot);
+check(
+  "空态：无任何配置时显示先添加入口",
+  emptyBtn().hidden === false && document.getElementById("service-empty").style.display !== "none",
+  `hidden=${emptyBtn().hidden}`,
+);
+currentSnapshot = makeSnapshot({ services: [] }); // 已有配置、零隧道
+await T.applySnapshot(currentSnapshot);
+check(
+  "空态：已有配置仅空隧道时隐藏先添加入口（不误导）",
+  emptyBtn().hidden === true && document.getElementById("service-empty").style.display !== "none",
+  `hidden=${emptyBtn().hidden}`,
+);
+currentSnapshot = makeSnapshot();
+await T.applySnapshot(currentSnapshot);
+check(
+  "空态：有配置有隧道时入口不可见且列表渲染",
+  emptyBtn().hidden === true && document.querySelectorAll("#service-list .service-item").length === 2,
+);
+
+// ---------- B 端口整数校验：小数被 JS 校验拦截，合法整数放行 ----------
+T.openServiceModal("新增 TCP / UDP 服务", null, "tcp");
+const intForm = document.getElementById("service-form");
+intForm.elements.name.value = "整数端口";
+sel.value = "srvA";
+const createBase = appStub.calls.filter((c) => c.name === "CreateService").length;
+intForm.elements.remotePort.value = "36000.5";
+intForm.dispatchEvent({ type: "submit", bubbles: true });
+await sleep(10);
+check(
+  "整数端口：小数被拦截并内联提示（不发 RPC）",
+  appStub.calls.filter((c) => c.name === "CreateService").length === createBase &&
+    document.getElementById("fld-service-form-remotePort-error")?.textContent === T.t("form.remotePortInvalid"),
+  String(document.getElementById("fld-service-form-remotePort-error")?.textContent),
+);
+intForm.elements.remotePort.value = "36002";
+intForm.dispatchEvent({ type: "submit", bubbles: true });
+await sleep(520);
+check(
+  "整数端口：合法整数提交成功且模态关闭",
+  appStub.calls.filter((c) => c.name === "CreateService").length === createBase + 1 &&
+    document.getElementById("service-modal").hidden === true,
+);
+
+// ---------- C 字段错误：跨表单 id 独立 / 既有 aria-describedby 保留 / 新开模态清理 ----------
+T.openServiceModal("新增 TCP / UDP 服务", null, "tcp");
+const feForm = document.getElementById("service-form");
+feForm.elements.name.value = "字段错误";
+sel.value = "srvA";
+feForm.dispatchEvent({ type: "submit", bubbles: true }); // 远程端口为空：JS 校验拦截
+await sleep(10);
+const svcPortErrId = "fld-service-form-remotePort-error";
+check(
+  "字段错误：服务表单 remotePort 就地内联（唯一 id 含表单前缀 + aria 落位）",
+  document.getElementById(svcPortErrId)?.textContent === T.t("form.remotePortInvalid") &&
+    feForm.elements.remotePort.getAttribute("aria-describedby") === svcPortErrId &&
+    feForm.elements.remotePort.getAttribute("aria-invalid") === "true",
+  String(feForm.elements.remotePort.getAttribute("aria-describedby")),
+);
+T.closeServiceModal();
+T.openServiceModal("重开服务模态", null, "tcp");
+check(
+  "字段错误：新开服务模态清理上一轮错误与 aria-invalid",
+  document.getElementById(svcPortErrId) === null &&
+    !feForm.elements.remotePort.getAttribute("aria-invalid") &&
+    !feForm.elements.remotePort.getAttribute("aria-describedby"),
+);
+T.closeServiceModal();
+
+// server 表单：预留既有 aria-describedby → 错误 id 追加不覆盖；两表单同名 name 不串台
+const feSrvForm = document.getElementById("server-form");
+const feSrvName = feSrvForm.elements.name;
+feSrvName.setAttribute("aria-describedby", "name-hint-x"); // 模拟字段既有描述 id
+appStub.CreateServer = (...a) => {
+  appStub.calls.push({ name: "CreateServer", args: a });
+  return Promise.reject(new Error("配置名称重复"));
+};
+T.openServerModal(null);
+feSrvForm.elements.name.value = "重名配置";
+feSrvForm.elements.serverAddr.value = "fe.example.com";
+feSrvForm.elements.serverPort.value = "7000";
+feSrvForm.dispatchEvent({ type: "submit", bubbles: true });
+await sleep(30);
+const srvNameErrId = "fld-server-form-name-error";
+check(
+  "字段错误：server 表单 name 错误节点就位（后端重复错误就近映射）",
+  document.getElementById(srvNameErrId)?.textContent.includes("重复") === true,
+  String(document.getElementById(srvNameErrId)?.textContent),
+);
+check(
+  "字段错误：同名 name 跨表单不串台（服务表单无同名错误节点）",
+  document.getElementById("fld-service-form-name-error") === null,
+);
+check(
+  "字段错误：既有 aria-describedby 保留且错误 id 追加",
+  (feSrvName.getAttribute("aria-describedby") || "").split(/\s+/).includes("name-hint-x") &&
+    (feSrvName.getAttribute("aria-describedby") || "").split(/\s+/).includes(srvNameErrId),
+  String(feSrvName.getAttribute("aria-describedby")),
+);
+T.clearFieldErrors(feSrvForm);
+check(
+  "字段错误清除：仅移除错误 id、保留既有描述 id、清 aria-invalid",
+  feSrvName.getAttribute("aria-describedby") === "name-hint-x" &&
+    !feSrvName.getAttribute("aria-invalid") &&
+    document.getElementById(srvNameErrId) === null,
+  String(feSrvName.getAttribute("aria-describedby")),
+);
+feSrvName.removeAttribute("aria-describedby"); // 还原现场
+T.closeServerModal();
+appStub.CreateServer = (...a) => Promise.resolve(appStub.record("CreateServer", a) ?? currentSnapshot);
+
+// ---------- D 原生约束 invalid 事件：真实浏览器 required/min/max 不触发 submit，须就地提示 ----------
+T.openServerModal(null);
+const invPort = feSrvForm.elements.serverPort;
+feSrvForm.elements.name.value = "invalid 提示";
+feSrvForm.elements.serverAddr.value = "inv.example.com";
+invPort.value = "";
+invPort.dispatchEvent({ type: "invalid", bubbles: true });
+check(
+  "invalid 事件：空必填端口就地提示（aria-invalid 同步）",
+  document.getElementById("fld-server-form-serverPort-error")?.textContent === T.t("form.required") &&
+    invPort.getAttribute("aria-invalid") === "true",
+  String(document.getElementById("fld-server-form-serverPort-error")?.textContent),
+);
+invPort.value = "70000"; // 越界（max=65535）
+invPort.dispatchEvent({ type: "invalid", bubbles: true });
+check(
+  "invalid 事件：越界端口给范围文案（同节点复用只更新文本）",
+  document.getElementById("fld-server-form-serverPort-error")?.textContent === T.t("form.portRange"),
+  String(document.getElementById("fld-server-form-serverPort-error")?.textContent),
+);
+T.clearFieldErrors(feSrvForm);
+T.closeServerModal();
+
+// ---------- E 重复提交防护：两表单在途双击仅一次 RPC；在途不可关闭/重开 ----------
+const svcModal = () => document.getElementById("service-modal");
+const srvModal = () => document.getElementById("server-modal");
+const dupSvcBase = appStub.calls.filter((c) => c.name === "CreateService").length;
+let releaseSvcDup;
+appStub.CreateService = (...a) => {
+  appStub.calls.push({ name: "CreateService", args: a });
+  return new Promise((r) => (releaseSvcDup = r));
+};
+T.openServiceModal("新增 TCP / UDP 服务", null, "tcp");
+const dupForm = document.getElementById("service-form");
+dupForm.elements.name.value = "防重服务";
+dupForm.elements.remotePort.value = "36001";
+sel.value = "srvA";
+dupForm.dispatchEvent({ type: "submit", bubbles: true });
+await sleep(10);
+dupForm.dispatchEvent({ type: "submit", bubbles: true }); // 在途连点
+T.closeServiceModal(); // 在途 Escape/取消：应被拦截
+await sleep(10);
+check(
+  "服务表单防重：在途双击仅 1 次 CreateService",
+  appStub.calls.filter((c) => c.name === "CreateService").length === dupSvcBase + 1,
+  String(appStub.calls.filter((c) => c.name === "CreateService").length - dupSvcBase),
+);
+check(
+  "服务表单在途：模态保持打开（关闭/重开被拦截）",
+  svcModal().hidden === false && T.state.serviceSaving === true,
+  `hidden=${svcModal().hidden} saving=${T.state.serviceSaving}`,
+);
+releaseSvcDup(currentSnapshot);
+await sleep(520);
+check(
+  "服务表单成功：迟到结果只关闭同一模态并提示成功",
+  svcModal().hidden === true && lastToast().includes("服务已添加"),
+  `hidden=${svcModal().hidden} toast=${lastToast()}`,
+);
+appStub.CreateService = (...a) => Promise.resolve(appStub.record("CreateService", a) ?? currentSnapshot);
+
+const dupSrvBase = appStub.calls.filter((c) => c.name === "CreateServer").length;
+let releaseSrvDup;
+appStub.CreateServer = (...a) => {
+  appStub.calls.push({ name: "CreateServer", args: a });
+  return new Promise((r) => (releaseSrvDup = r));
+};
+T.openServerModal(null);
+const dupSrvForm = document.getElementById("server-form");
+dupSrvForm.elements.name.value = "防重配置";
+dupSrvForm.elements.serverAddr.value = "dup.example.com";
+dupSrvForm.elements.serverPort.value = "7000";
+dupSrvForm.dispatchEvent({ type: "submit", bubbles: true });
+await sleep(10);
+dupSrvForm.dispatchEvent({ type: "submit", bubbles: true }); // 在途连点
+T.closeServerModal(); // 在途 Escape/取消：应被拦截
+await sleep(10);
+check(
+  "配置表单防重：在途双击仅 1 次 CreateServer",
+  appStub.calls.filter((c) => c.name === "CreateServer").length === dupSrvBase + 1,
+  String(appStub.calls.filter((c) => c.name === "CreateServer").length - dupSrvBase),
+);
+check(
+  "配置表单在途：模态保持打开（关闭/重开被拦截）",
+  srvModal().hidden === false && T.state.serverSaving === true,
+  `hidden=${srvModal().hidden} saving=${T.state.serverSaving}`,
+);
+releaseSrvDup(currentSnapshot);
+await sleep(520);
+check(
+  "配置表单成功：模态关闭并提示成功",
+  srvModal().hidden === true && lastToast().includes("配置已添加"),
+  `hidden=${srvModal().hidden} toast=${lastToast()}`,
+);
+appStub.CreateServer = (...a) => Promise.resolve(appStub.record("CreateServer", a) ?? currentSnapshot);
+
+// ---------- F 开关防重：toggle 在途 disabled + 连点只发一次 SetServiceEnabled ----------
+let releaseToggle;
+let toggleCallCount = 0;
+appStub.SetServiceEnabled = (...a) => {
+  toggleCallCount++;
+  return new Promise((r) => (releaseToggle = r));
+};
+currentSnapshot = makeSnapshot({
+  services: [{ id: "svcTog", name: "防重隧道", type: "tcp", subdomain: "", localHost: "127.0.0.1", localPort: 22, remotePort: 36010, enabled: true, serverId: "srvA", icon: "" }],
+});
+await T.applySnapshot(currentSnapshot);
+const togInput = () => document.querySelector('#service-list .service-item input[data-act="toggle"]');
+togInput().checked = false;
+togInput().dispatchEvent({ type: "change", bubbles: true });
+await sleep(10);
+togInput().dispatchEvent({ type: "change", bubbles: true }); // 在途连点：togglePending 拦截
+await sleep(10);
+check(
+  "开关防重：在途连点仅 1 次 SetServiceEnabled",
+  toggleCallCount === 1,
+  String(toggleCallCount),
+);
+check(
+  "开关防重：在途开关 disabled 且在途标记记录",
+  togInput().disabled === true && T.state.togglePending.has("svcTog"),
+  `disabled=${togInput().disabled}`,
+);
+releaseToggle(currentSnapshot);
+await sleep(30);
+check(
+  "开关防重：完成后恢复可点并清除在途标记",
+  togInput().disabled === false && !T.state.togglePending.has("svcTog"),
+  `disabled=${togInput().disabled}`,
+);
+appStub.SetServiceEnabled = (...a) => Promise.resolve(appStub.record("SetServiceEnabled", a) ?? currentSnapshot);
+
+// ---------- G 启动快照失败重试：错误态保留可再试、成功收起 ----------
+currentSnapshot = makeSnapshot();
+let snapshotFail = true;
+const realSnapshotFn = appStub.Snapshot;
+appStub.Snapshot = () => (snapshotFail ? Promise.reject(new Error("快照拉取失败")) : Promise.resolve(currentSnapshot));
+const bootBox = document.getElementById("boot-error");
+const retryBtn = document.getElementById("btn-boot-retry");
+bootBox.hidden = false; // 模拟启动期重试耗尽后的错误态（renderBootError 落点）
+document.getElementById("service-empty").style.display = "none";
+retryBtn.click();
+await sleep(30);
+check(
+  "快照重试失败：错误态保留、按钮恢复可点、toast 呈现原因",
+  bootBox.hidden === false && retryBtn.disabled === false && lastToast().includes("快照拉取失败"),
+  `hidden=${bootBox.hidden} disabled=${retryBtn.disabled} toast=${lastToast()}`,
+);
+snapshotFail = false;
+retryBtn.click();
+await sleep(30);
+check(
+  "快照重试成功：错误态收起且服务列表渲染",
+  bootBox.hidden === true && document.querySelectorAll("#service-list .service-item").length === 2,
+  `hidden=${bootBox.hidden}`,
+);
+appStub.Snapshot = realSnapshotFn;
+
+// ---------- H setBgInert 嵌套恢复：内层浮层关闭不解除仍打开模态的圈定 ----------
+T.openServiceModal("嵌套圈定", null, "http");
+const appEl = document.querySelector(".app");
+const svcModalEl = document.getElementById("service-modal");
+check(
+  "模态打开：背景圈定且模态自身可交互",
+  appEl.inert === true && svcModalEl.inert === false,
+  `app=${appEl.inert} modal=${svcModalEl.inert}`,
+);
+const nestedOverlay = document.createElement("div");
+document.body.appendChild(nestedOverlay);
+T.setBgInert(nestedOverlay, true);
+check(
+  "内层浮层开启：自身可交互，背景与外层模态全部圈定",
+  nestedOverlay.inert === false && appEl.inert === true && svcModalEl.inert === true,
+  `overlay=${nestedOverlay.inert} app=${appEl.inert} modal=${svcModalEl.inert}`,
+);
+T.setBgInert(nestedOverlay, false);
+check(
+  "内层浮层关闭：按开启前快照恢复（外层模态圈定不误解除）",
+  appEl.inert === true && svcModalEl.inert === false,
+  `app=${appEl.inert} modal=${svcModalEl.inert}`,
+);
+T.closeServiceModal();
+check("外层模态关闭：背景恢复可交互", appEl.inert === false, `app=${appEl.inert}`);
+nestedOverlay.remove();
 
 // ---------- 汇总 ----------
 console.log(`\n===== 行为验证汇总：${pass}/${pass + fail} 通过 =====`);

@@ -106,8 +106,10 @@ export const DICT = {
   // 日志面板公共归属固定为 System（不随界面语言翻译；不进词典）
 
   // ---- 空态 ----
-  "empty.services": { zh: "还没有穿透服务，点右上角「新增」。", en: "No tunnels yet. Click \"Add\" in the top-right corner." },
+  "empty.services": { zh: "还没有穿透服务，点右上角新增服务。", en: "No tunnels yet. Add one from the top-right corner." },
   "empty.servers": { zh: "还没有 Frps 配置，点右上角「新增 Frps」。", en: "No Frps configurations yet. Click \"Add Frps\" in the top-right corner." },
+  // 首次使用引导：隧道空态/服务表单无可用 Frps 时的跳转入口按钮
+  "empty.addServerFirst": { zh: "先添加 Frps 配置", en: "Add a Frps configuration first" },
 
   // ---- 统计 ----
   "stats.emptyTitle": { zh: "暂无统计数据", en: "No statistics yet" },
@@ -220,7 +222,11 @@ export const DICT = {
   // ---- 通用确认/按钮 ----
   "generic.cancel": { zh: "取消", en: "Cancel" },
   "generic.save": { zh: "保存", en: "Save" },
+  "generic.saving": { zh: "保存中…", en: "Saving…" },
   "generic.delete": { zh: "删除", en: "Delete" },
+  "generic.retry": { zh: "重试", en: "Retry" },
+  // 启动快照拉取失败（重试耗尽）的列表区错误态标题；错误详情为后端原文不进词典
+  "boot.loadFailTitle": { zh: "启动数据加载失败", en: "Failed to load app data" },
 
   // ---- 操作失败前缀与操作名（toast / 前端日志共用） ----
   "run.fail": { zh: "{0}失败：{1}", en: "{0} failed: {1}" },
@@ -241,6 +247,9 @@ export const DICT = {
   // ---- Toast ----
   "toast.copied": { zh: "地址已复制", en: "Address copied" },
   "toast.copyFail": { zh: "复制失败", en: "Copy failed" },
+  // 超长 toast 错误的「复制完整原文」按钮及其反馈（与 toast.copyFail 复用失败文案）
+  "toast.copy": { zh: "复制", en: "Copy" },
+  "toast.copiedShort": { zh: "已复制", en: "Copied" },
   "toast.configUpdated": { zh: "配置已更新", en: "Configuration updated" },
   "toast.configAdded": { zh: "配置已添加", en: "Configuration added" },
   "toast.configDeleted": { zh: "配置已删除", en: "Configuration deleted" },
@@ -280,6 +289,11 @@ export const DICT = {
   "form.remotePortHelp": { zh: "frps 侧监听端口，必填", en: "Listening port on the frps side; required" },
   "form.remotePortHelpAria": { zh: "远程端口说明", en: "Remote port help" },
   "form.remotePortPh": { zh: "例如：36000", en: "e.g. 36000" },
+  "form.remotePortInvalid": { zh: "请填写 1-65535 之间的远程端口", en: "Enter a remote port between 1 and 65535" },
+  // 必填视觉标记（远程端口 field-badge）与原生约束 invalid 事件的就近内联文案
+  "form.requiredBadge": { zh: "必填", en: "Required" },
+  "form.required": { zh: "请填写该项", en: "This field is required" },
+  "form.portRange": { zh: "端口需为 1-65535 的整数", en: "Port must be an integer between 1 and 65535" },
   "form.targetServer": { zh: "目标 Frps", en: "Target Frps" },
 
   // ---- 模态：Frps 配置 ----

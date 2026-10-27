@@ -22,6 +22,9 @@ const state = {
   updateConfirming: false, // 确认弹窗期间防双击多弹窗
   updateApplying: false, // InstallUpdate RPC 挂起期间防重复触发（同步等待下载+重启，持续到真实完成）
   modalCtx: null, // 服务/配置模态打开上下文（语言切换时重算动态标题）
+  serviceSaving: false, // 服务表单提交在途（防双击重复创建/保存）
+  serverSaving: false, // Frps 配置表单提交在途（防双击重复创建/保存）
+  togglePending: new Set(), // 启用/停用 RPC 在途的服务 id 集合（期间开关禁点，防后到响应覆盖最后意图）
   dragSort: null, // 卡片拖拽排序进行中上下文（非 null 时事件推送不重建列表，拖拽结束后统一补绘）
   listRenderHoldUntil: 0, // 开关动画保护窗截止时间（拖拽另有 dragSort 状态，二者独立）
 };
@@ -217,6 +220,48 @@ function randomEmoji() {
 function briefText(s, n) {
   const chars = Array.from(s || "");
   return chars.length > n ? chars.slice(0, n).join("") + "…" : s;
+}
+
+// setBusy：按钮忙态小工具——禁用并把文案切为 busyText，恢复时还原原文案
+//（供服务/Frps 两个表单的保存按钮复用，杜绝提交期间双击重复提交）
+function setBusy(btn, busy, busyText) {
+  if (!btn) return;
+  if (busy) {
+    if (!btn.dataset.busyOrig) btn.dataset.busyOrig = btn.textContent;
+    btn.textContent = busyText;
+  } else if (btn.dataset.busyOrig) {
+    btn.textContent = btn.dataset.busyOrig;
+    delete btn.dataset.busyOrig;
+  }
+  btn.disabled = busy;
+}
+
+// copyTextToClipboard：写剪贴板。优先 wails 原生剪贴板（WKWebView 下 navigator.clipboard
+// 受 secure context 限制，与地址复制同因），降级 navigator.clipboard，再降级
+// 隐藏 textarea + execCommand。返回是否成功。
+async function copyTextToClipboard(text) {
+  try {
+    await window.wails?.Clipboard?.SetText(text);
+    return true;
+  } catch {}
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 // ---------- 语言与设置弹层（顶栏齿轮：语言/主题/开机自启动）----------
@@ -428,11 +473,34 @@ function toast(level, text) {
   // JS 死循环整页冻结（狂点启停时高密度 toast 必现）。
   const active = Array.from(box.children).filter((el) => !el.dataset.leaving);
   while (active.length >= 3) dismissToast(active.shift());
-  // 超长错误截断渲染，防止撑坏 toast；全文已进后端环形日志，不怕丢信息
-  const shown = briefText(text, 120);
+  // 超长错误截断渲染，防止撑坏 toast；全文已进后端环形日志，不怕丢信息。
+  // 截断时附「复制」按钮：错误详情（地址/端口等）可复制完整原文，不丢排查线索
+  const full = String(text ?? "");
+  const truncated = Array.from(full).length > 120;
+  const shown = truncated ? briefText(full, 120) : full;
   const el = document.createElement("div");
   el.className = `toast toast--${level}`;
   el.innerHTML = `${TOAST_ICONS[level] ?? TOAST_ICONS.info}<span class="toast-text">${esc(shown)}</span>`;
+  if (truncated) {
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "toast-copy";
+    copyBtn.textContent = t("toast.copy");
+    // .toast 为 pointer-events:none 的纯展示层，按钮需显式恢复可点
+    copyBtn.style.pointerEvents = "auto";
+    copyBtn.style.cursor = "pointer";
+    copyBtn.style.border = "none";
+    copyBtn.style.background = "transparent";
+    copyBtn.style.color = "inherit";
+    copyBtn.style.fontSize = "12px";
+    copyBtn.style.padding = "2px 6px";
+    copyBtn.addEventListener("click", async () => {
+      const ok = await copyTextToClipboard(full);
+      // 简短反馈：成功「已复制」/失败「复制失败」（toast 存续期内直接改按钮文案）
+      copyBtn.textContent = ok ? t("toast.copiedShort") : t("toast.copyFail");
+    });
+    el.appendChild(copyBtn);
+  }
   box.appendChild(el);
   void el.offsetWidth; // 强制回流提交初始态（translateY(-12px)+opacity:0）
   el.classList.add("is-in"); // 进场 200ms var(--ease-out)
@@ -445,6 +513,135 @@ function dismissToast(el) {
   el.classList.remove("is-in"); // 原路反向 160ms
   el.addEventListener("transitionend", () => el.remove(), { once: true });
   setTimeout(() => el.remove(), 200); // transitionend 兜底
+}
+
+// ---------- 表单字段级错误（提交错误就近内联提示） ----------
+
+// fieldErrorId：字段唯一 id（所属表单 id + 字段名；错误节点 id 再加 -error 后缀）。
+// 两个表单存在同名字段（如 name），仅用字段名生成的 id 会跨表单冲突、错误节点串台。
+function fieldErrorId(fieldEl) {
+  let form = fieldEl;
+  while (form && form.tagName !== "FORM") form = form.parent ?? form.parentNode ?? null;
+  const name = fieldEl.getAttribute?.("name") || Math.random().toString(36).slice(2, 8);
+  return `fld-${form?.id || "form"}-${name}`;
+}
+
+// renderFieldError：在字段下方插入/更新 <div class="field-error" id="{errId}">，
+// 并把错误 id 追加进 input 的 aria-describedby（保留既有描述 id，读屏可关联）、
+// 补 aria-invalid=true；同字段重复调用只更新文本。
+// 插入位置为字段所在 label 的末尾（表单结构 label > span + input，即视觉上的字段下方）。
+function renderFieldError(fieldEl, msg) {
+  if (!fieldEl) return;
+  const errId = `${fieldErrorId(fieldEl)}-error`;
+  let tip = document.getElementById(errId);
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.className = "field-error";
+    tip.id = errId;
+    (fieldEl.parent ?? fieldEl.parentNode ?? document.body).appendChild(tip);
+  }
+  const described = String(fieldEl.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!described.includes(errId)) described.push(errId);
+  fieldEl.setAttribute("aria-describedby", described.join(" "));
+  fieldEl.setAttribute("aria-invalid", "true");
+  tip.textContent = msg;
+}
+
+// clearFieldErrors：清空表单内全部字段错误（提交开始/新开模态时调用，避免旧错误残留）。
+// aria-describedby 仅摘除错误 id、保留其他既有描述 id，并同步清掉 aria-invalid。
+function clearFieldErrors(formEl) {
+  if (!formEl) return;
+  formEl.querySelectorAll(".field-error").forEach((el) => el.remove());
+  for (const el of formEl.querySelectorAll("input, select")) {
+    const rest = String(el.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/)
+      .filter((id) => id && !id.endsWith("-error"));
+    if (rest.length) el.setAttribute("aria-describedby", rest.join(" "));
+    else el.removeAttribute("aria-describedby");
+    el.removeAttribute("aria-invalid");
+  }
+}
+
+// invalidFieldMessage：原生约束校验（required/min/max）的 invalid 事件就近文案。
+// 从属性/取值推导而非读 validity：invalid 不冒泡、各 WebView 时机差异大，属性判断
+// 在真实 DOM 与测试桩中行为一致。远程端口与 JS 校验同文案，其余端口字段给范围提示。
+function invalidFieldMessage(el) {
+  if (el?.getAttribute?.("name") === "remotePort") return t("form.remotePortInvalid");
+  if (!String(el?.value ?? "").trim()) return t("form.required");
+  if (el.getAttribute?.("min") != null || el.getAttribute?.("max") != null) return t("form.portRange");
+  return t("form.required");
+}
+
+// bindInvalidHint：原生校验失败不会进入 submit handler，改以捕获阶段监听 invalid
+// （invalid 不冒泡，须祖先捕获监听才能收到），把错误就近内联到字段（与 JS 校验同一路径）。
+function bindInvalidHint(formEl) {
+  formEl.addEventListener(
+    "invalid",
+    (e) => {
+      if (e.target && e.target !== formEl) renderFieldError(e.target, invalidFieldMessage(e.target));
+    },
+    true,
+  );
+}
+
+// mapSubmitError：后端错误文本就近映射为字段级内联提示（顶部 toast 已由 run() 给出，
+// 二者并存：toast 即时消失，字段错误保留上下文直至下次提交清空）。返回是否已映射。
+// 命名重复 → 名称字段；端口占用/冲突 → 端口字段；「无效/invalid」按内容细分；
+// 其余（网络、权限等不可定位错误）不映射，仅保留顶部 toast。
+// 错误原文为后端语义（FRP 原始错误保持原文呈现，不进词典）。
+function mapSubmitError(form, err, portField) {
+  const msg = String(err?.message ?? err ?? "");
+  let target = null;
+  if (/重复|duplicate|already exists/i.test(msg)) target = form.elements.name;
+  else if (/占用|in use|address already/i.test(msg)) target = portField;
+  else if (/无效|invalid/i.test(msg)) {
+    if (/端口|port/i.test(msg)) target = portField;
+    else if (/名称|name/i.test(msg)) target = form.elements.name;
+  }
+  if (!target) return false;
+  renderFieldError(target, briefText(msg, 200));
+  return true;
+}
+
+// ---------- 浮层焦点圈定（模态/确认框打开期间背景 inert） ----------
+
+// setBgInert：把 body 顶层子元素（除 exceptEl 与 toasts）设/清 inert，圈定焦点与点击
+// 于当前浮层——修复「确认框打开时焦点仍在背景按钮、按 Enter 叠加第二个确认框」。
+// toasts 是全局反馈层保持可交互（长错误 toast 的复制按钮不被误禁），因此并非完美
+// focus trap；嵌套浮层（模态上再叠浮层）关闭时按开启前快照恢复原值，不会把仍打开
+// 的外层模态一起解除圈定。
+// bgInertSaved：exceptEl → Map(背景元素 → 开启前的 inert 值)；WeakMap 随浮层节点回收。
+const bgInertSaved = new WeakMap();
+
+function setBgInert(exceptEl, on) {
+  if (on) {
+    const saved = new Map();
+    for (const el of document.body.children) {
+      if (el === exceptEl || el.id === "toasts") continue;
+      saved.set(el, Boolean(el.inert));
+      try {
+        el.inert = true;
+      } catch {}
+    }
+    try {
+      exceptEl.inert = false; // 打开的浮层自身必须可交互（可能被外层圈定时一并置过 inert）
+    } catch {}
+    bgInertSaved.set(exceptEl, saved);
+    return;
+  }
+  const saved = bgInertSaved.get(exceptEl);
+  bgInertSaved.delete(exceptEl);
+  // 无快照兜底（理论不达：on/off 成对调用）：按旧行为直接解除
+  const targets = saved
+    ? [...saved.keys()]
+    : [...document.body.children].filter((el) => el !== exceptEl && el.id !== "toasts");
+  for (const el of targets) {
+    try {
+      el.inert = saved ? saved.get(el) : false;
+    } catch {}
+  }
 }
 
 // ---------- 表单小问号帮助 tooltip（hover/focus 延迟 400ms；单例元素，随语言重绘）----------
@@ -792,6 +989,12 @@ function renderServices(snapshot) {
   const list = $("service-list");
   list.querySelectorAll(".service-item").forEach((el) => el.remove());
   $("service-empty").style.display = snapshot.config.services.length ? "none" : "";
+  // 空态引导按钮仅在确实没有任何 Frps 配置时出现：已有配置只是还没有隧道时，
+  // 「先添加 Frps 配置」会误导（此时应点右上角新增服务）
+  const emptyAddBtn = $("btn-empty-add-server");
+  if (emptyAddBtn) emptyAddBtn.hidden = configServers().length > 0;
+  const bootErr = $("boot-error");
+  if (bootErr) bootErr.hidden = true; // 快照已就绪：启动失败错误态退场（含重试成功/事件推送路径）
 
   for (const svc of snapshot.config.services) {
     const type = svc.type === "tcp" || svc.type === "udp" ? svc.type : "http";
@@ -843,7 +1046,7 @@ function renderServices(snapshot) {
         ${copyBtn}
         <button class="btn btn-icon btn-ghost svc-op svc-op--r1" data-act="edit" title="${escAttr(t("action.edit"))}" aria-label="${escAttr(t("action.edit"))}">${ICONS.pencil}</button>
         <button class="btn btn-icon btn-ghost svc-op svc-op-danger svc-op--r0" data-act="delete" title="${escAttr(t("action.delete"))}" aria-label="${escAttr(t("action.delete"))}">${ICONS.trash}</button>
-        <input type="checkbox" class="switch" data-act="toggle" ${svc.enabled ? "checked" : ""} title="${escAttr(t("action.toggleEnabled"))}" />
+        <input type="checkbox" class="switch" data-act="toggle" ${svc.enabled ? "checked" : ""} ${state.togglePending.has(svc.id) ? "disabled" : ""} title="${escAttr(t("action.toggleEnabled"))}" />
       </div>
     `;
     list.appendChild(item);
@@ -1628,11 +1831,26 @@ function renderRecent(recent) {
 // 按钮与 overlay 点击、Escape 取消。供 askConfirm（一行文本）与 askUpdateConfirm（更新
 // 日志）复用；Promise 只 resolve 一次；done 时同步解绑 Escape 监听，避免残留监听在
 // 后续 Escape 误触发。
+// 焦点管理：打开即聚焦确认按钮（焦点进入对话框，背景 inert 圈定防「焦点滞留背景
+// 按钮、按 Enter 叠加第二个确认框」）；关闭归还焦点到打开前的 activeElement。
 function mountConfirm(panelHTML, resolve) {
+  const prevFocus = document.activeElement; // 关闭后归还焦点
   const overlay = document.createElement("div");
   overlay.className = "confirm";
   overlay.innerHTML = `<div class="confirm-overlay"></div>${panelHTML}`;
+  const panel = overlay.querySelector(".confirm-panel");
+  // 无障碍语义：对话框 + 模态；标题作可访问名（一行确认用正文、更新日志用标题）
+  if (panel) {
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    const label = overlay.querySelector(".confirm-text, .update-confirm-title");
+    if (label) {
+      if (!label.id) label.id = "confirm-panel-label";
+      panel.setAttribute("aria-labelledby", label.id);
+    }
+  }
   document.body.appendChild(overlay);
+  setBgInert(overlay, true); // 背景圈定：确认期间背景不可交互
   void overlay.offsetWidth; // 提交初始态后再过渡
   overlay.classList.add("is-open");
   let settled = false;
@@ -1644,6 +1862,8 @@ function mountConfirm(panelHTML, resolve) {
     settled = true;
     document.removeEventListener("keydown", onKey);
     overlay.classList.remove("is-open");
+    setBgInert(overlay, false); // 先恢复背景可交互，再归还焦点
+    if (prevFocus?.focus) prevFocus.focus();
     setTimeout(() => overlay.remove(), 300);
     resolve(val);
   };
@@ -1653,10 +1873,12 @@ function mountConfirm(panelHTML, resolve) {
     else if (e.target.classList.contains("confirm-overlay")) done(false);
   });
   document.addEventListener("keydown", onKey);
+  overlay.querySelector('button[data-r="1"]')?.focus(); // 打开即聚焦确认按钮
 }
 
 // askConfirm(message, opts)：通用一行文本确认（删除/退出等场景），行为不变。
-// opts.confirmText 自定义确认按钮文案（默认「删除」，不影响删除场景）。
+// opts.confirmText 自定义确认按钮文案（默认「删除」）；confirmClass 自定义确认按钮
+// 样式（默认「btn-danger」危险色，破坏性确认为主；非破坏性场景需显式传 btn-primary）。
 function askConfirm(message, opts = {}) {
   return new Promise((resolve) => {
     mountConfirm(
@@ -1665,7 +1887,7 @@ function askConfirm(message, opts = {}) {
         <p class="confirm-text">${esc(message)}</p>
         <div class="form-actions">
           <button class="btn" data-r="0">${esc(t("generic.cancel"))}</button>
-          <button class="btn ${opts.confirmClass ?? "btn-primary"}" data-r="1">${esc(opts.confirmText ?? t("generic.delete"))}</button>
+          <button class="btn ${opts.confirmClass ?? "btn-danger"}" data-r="1">${esc(opts.confirmText ?? t("generic.delete"))}</button>
         </div>
       </div>
     `,
@@ -1753,6 +1975,9 @@ function setServiceType(t, opts = {}) {
   document.querySelector('[data-fields="proto"]').hidden = t === "http"; // 协议选择仅端口服务可见
   const protoSel = $("svc-proto-select");
   if (protoSel) protoSel.value = isPortType(t) ? t : "tcp"; // http 时隐藏且不参与提交，值无意义
+  // 远程端口仅端口服务必填：HTTP 时容器隐藏，必须同步取消 required，
+  // 避免隐藏的必填项拦截表单提交（与 Frps 表单 baseDomain 的 disabled 同思路）
+  form.elements.remotePort.required = isPortType(t);
   syncIconBtn(); // 兜底图标随类型走（未选图标时 http 🌐 / tcp 🔌 / udp 📡）
   syncServerSelect(t, Boolean(opts.preserveServer)); // 合格目标列表随类型变化（HTTP 仅 httpEnabled；TCP/UDP 全部）
 }
@@ -1777,8 +2002,13 @@ function syncServerSelect(type, preserve = false) {
     sel.innerHTML = `<option value="">${esc(t(type === "http" ? "pick.noHttpServer" : "pick.noServer"))}</option>`;
     sel.value = "";
     sel.disabled = true;
+    // 无合格目标：就地给出「先添加 Frps 配置」入口（不等用户点保存才被 toast 引导）
+    const addBtn = $("btn-svc-add-server");
+    if (addBtn) addBtn.hidden = false;
     return;
   }
+  const addBtn = $("btn-svc-add-server");
+  if (addBtn) addBtn.hidden = true;
   sel.disabled = false;
   sel.innerHTML = options
     .map((s) => `<option value="${escAttr(s.id)}">${esc(s.name || serverConnAddr(s))}${state.editingId && s.id === currentId ? esc(t("pick.currentSuffix")) : ""}</option>`)
@@ -1857,6 +2087,7 @@ function openServiceModal(title, svc, typeOverride) {
       ? t("action.addHttp")
       : t("action.addPort");
   const form = $("service-form");
+  clearFieldErrors(form); // 新开模态：清上一轮残留的字段错误与 aria-invalid
   form.elements.name.value = svc ? svc.name : "";
   form.elements.localHost.value = svc ? svc.localHost : "127.0.0.1";
   form.elements.localPort.value = svc ? svc.localPort : "";
@@ -1868,19 +2099,27 @@ function openServiceModal(title, svc, typeOverride) {
   setServiceType(type);
 
   const modal = $("service-modal");
+  clearTimeout(serviceModalHideTimer); // 快速重开：取消上一轮退场隐藏，防误藏刚打开的模态
+  serviceModalHideTimer = null;
   modalReturnFocus = document.activeElement;
   modal.hidden = false;
+  setBgInert(modal, true); // 背景圈定：模态期间焦点圈定在表单内（关闭恢复）
   void modal.offsetHeight; // 提交初始态，过渡可靠
   modal.classList.add("is-open");
   form.elements.name.focus();
 }
 
+// serviceModalHideTimer：退场隐藏定时器句柄（重开时取消，对齐设置弹层的快速重开保护）
+let serviceModalHideTimer = null;
+
 function closeServiceModal() {
   const modal = $("service-modal");
   if (modal.hidden) return;
+  if (state.serviceSaving) return; // 提交在途：阻止关闭/重开，防迟到成功关闭重开后的新模态
   closeIconPopover(true); // 模态关闭时 popover 同步收起，避免残留到下次打开
   hideFieldTip(); // 帮助 tooltip 同步收起
   modal.classList.remove("is-open");
+  setBgInert(modal, false); // 同步恢复背景（过渡动画期间背景已可交互）
   const panel = modal.querySelector(".modal-panel");
   let hidden = false;
   const hide = () => {
@@ -1890,7 +2129,8 @@ function closeServiceModal() {
     panel.removeEventListener("transitionend", hide);
   };
   panel.addEventListener("transitionend", hide);
-  setTimeout(hide, 400); // 兜底
+  clearTimeout(serviceModalHideTimer);
+  serviceModalHideTimer = setTimeout(hide, 400); // 兜底
   if (modalReturnFocus && modalReturnFocus.focus) modalReturnFocus.focus();
   modalReturnFocus = null;
   state.editingId = null;
@@ -1919,6 +2159,7 @@ function openServerModal(srv) {
   state.modalCtx = { kind: "server", editing: Boolean(srv) };
   $("server-modal-title").textContent = srv ? t("modal.editServer") : t("modal.addServer");
   const form = $("server-form");
+  clearFieldErrors(form); // 新开模态：清上一轮残留的字段错误与 aria-invalid
   form.elements.name.value = srv ? srv.name : "";
   form.elements.serverAddr.value = srv ? srv.serverAddr : "";
   form.elements.serverPort.value = srv ? srv.serverPort : 7000;
@@ -1931,17 +2172,25 @@ function openServerModal(srv) {
 
   state.serverReturnFocus = document.activeElement;
   const modal = $("server-modal");
+  clearTimeout(serverModalHideTimer); // 快速重开：取消上一轮退场隐藏，防误藏刚打开的模态
+  serverModalHideTimer = null;
   modal.hidden = false;
+  setBgInert(modal, true); // 背景圈定：模态期间焦点圈定在表单内（关闭恢复）
   void modal.offsetHeight; // 提交初始态，过渡可靠
   modal.classList.add("is-open");
   form.elements.name.focus();
 }
 
+// serverModalHideTimer：退场隐藏定时器句柄（重开时取消，对齐设置弹层的快速重开保护）
+let serverModalHideTimer = null;
+
 function closeServerModal() {
   const modal = $("server-modal");
   if (modal.hidden) return;
+  if (state.serverSaving) return; // 提交在途：阻止关闭/重开，防迟到成功关闭重开后的新模态
   hideFieldTip(); // 帮助 tooltip 同步收起
   modal.classList.remove("is-open");
+  setBgInert(modal, false); // 同步恢复背景（过渡动画期间背景已可交互）
   const panel = modal.querySelector(".modal-panel");
   let hidden = false;
   const hide = () => {
@@ -1951,7 +2200,8 @@ function closeServerModal() {
     panel.removeEventListener("transitionend", hide);
   };
   panel.addEventListener("transitionend", hide);
-  setTimeout(hide, 400); // 兜底
+  clearTimeout(serverModalHideTimer);
+  serverModalHideTimer = setTimeout(hide, 400); // 兜底
   if (state.serverReturnFocus?.focus) state.serverReturnFocus.focus();
   state.serverReturnFocus = null;
   state.serverEditingId = null;
@@ -1962,15 +2212,20 @@ function closeServerModal() {
 
 // qrCache：url → data URL。二维码内容只取决于地址，命中缓存免再走后端生成
 const qrCache = new Map();
+let qrReturnFocus = null; // 关闭后归还焦点到触发按钮
 
 async function openQrModal(url) {
   if (!url) return;
   const modal = $("qr-modal");
+  const panel = $("qr-panel");
   const box = $("qr-box");
   $("qr-url").textContent = url;
+  qrReturnFocus = document.activeElement; // 关闭归还焦点到触发按钮
   modal.hidden = false;
+  setBgInert(modal, true); // 背景圈定：弹窗期间焦点圈定（关闭恢复）
   void modal.offsetHeight; // 提交初始态后再过渡（对齐其他模态）
   modal.classList.add("is-open");
+  panel.focus(); // 键盘/读屏焦点进入弹窗（panel 带 tabindex=-1）
 
   const cached = qrCache.get(url);
   if (cached) {
@@ -1996,6 +2251,9 @@ function closeQrModal() {
   const modal = $("qr-modal");
   if (modal.hidden) return;
   modal.classList.remove("is-open");
+  setBgInert(modal, false); // 同步恢复背景（过渡动画期间背景已可交互）
+  if (qrReturnFocus?.focus) qrReturnFocus.focus(); // 归还焦点到触发按钮
+  qrReturnFocus = null;
   const panel = modal.querySelector(".modal-panel");
   let hidden = false;
   const hide = () => {
@@ -2179,8 +2437,8 @@ function renderMarkdown(md) {
 // askUpdateConfirm：更新日志确认弹窗（notes 非空时走这里，不影响通用 askConfirm）。
 // 标题区 = 状态语义文案 + 新版本号，副行 = 当前版本 + 重启断开提示；内容区 =
 // 渲染后的更新日志（超高滚动不撑爆弹窗）；按钮区 = 取消 + 分支确认按钮。
-// 交互与 askConfirm 一致：取消/overlay 点击/Escape 都 resolve(false)，确认 resolve(true)，
-// 焦点不抢占（跟随现有确认框模式）。
+// 交互与 askConfirm 一致：取消/overlay 点击/Escape 都 resolve(false)，确认 resolve(true)；
+// 焦点管理（打开聚焦确认按钮、背景 inert、关闭归还）由 mountConfirm 统一处理。
 function askUpdateConfirm({ title, meta, notes, confirmText }) {
   return new Promise((resolve) => {
     mountConfirm(
@@ -2226,7 +2484,10 @@ async function applyUpdateClick() {
           notes,
           confirmText: text.confirmText(),
         })
-      : await askConfirm(text.message(target, info.currentVersion), { confirmText: text.confirmText() });
+      : await askConfirm(text.message(target, info.currentVersion), {
+          confirmText: text.confirmText(),
+          confirmClass: "btn-primary", // 更新为非破坏性确认：不用默认危险色
+        });
   } finally {
     state.updateConfirming = false;
     renderUpdate();
@@ -2318,12 +2579,16 @@ function bindEvents() {
   // Frps 配置模态：新增/编辑/HTTP 能力切换/提交（成功关模态，失败保持打开，错误 toast 由 run() 给出）
   $("btn-add-server").addEventListener("click", () => openServerModal(null));
   document.querySelectorAll("[data-close-server]").forEach((el) => el.addEventListener("click", closeServerModal));
+  bindInvalidHint($("server-form")); // 原生约束（required/min/max）失败的就地内联提示
+  bindInvalidHint($("service-form"));
   $("server-form").elements.httpEnabled.addEventListener("change", (e) => {
     toggleServerHttpFields(e.target.checked); // 仅 change 驱动；label 原生切换不手动 click
   });
   $("server-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (state.serverSaving) return; // 提交在途：防双击重复创建/保存
     const form = $("server-form");
+    clearFieldErrors(form); // 提交开始：清上一轮字段错误
     const httpEnabled = form.elements.httpEnabled.checked;
     const input = {
       name: form.elements.name.value.trim(),
@@ -2336,16 +2601,26 @@ function bindEvents() {
       scheme: form.elements.scheme.value === "http" ? "http" : "https",
       publicPort: Number(form.elements.publicPort.value) || 0,
     };
+    const wasEditing = Boolean(state.serverEditingId);
+    const opKey = wasEditing ? "run.saveConfig" : "run.createConfig";
+    const saveBtn = form.querySelector('button[type="submit"]');
+    state.serverSaving = true;
+    setBusy(saveBtn, true, t("generic.saving")); // 保存按钮忙态：禁用 + 「保存中…」
     try {
-      const wasEditing = Boolean(state.serverEditingId);
       const snapshot = wasEditing
-        ? await run("run.saveConfig", () => api.AppService.UpdateServer(state.serverEditingId, input))
-        : await run("run.createConfig", () => api.AppService.CreateServer(input));
+        ? await run(opKey, () => api.AppService.UpdateServer(state.serverEditingId, input))
+        : await run(opKey, () => api.AppService.CreateServer(input));
+      state.serverSaving = false; // 成功：先解除在途，再关闭（closeServerModal 会拦在途关闭）
       closeServerModal();
       applyConfigOnly(snapshot);
       toast("success", wasEditing ? t("toast.configUpdated") : t("toast.configAdded"));
-    } catch {
-      // 失败原因已由 run() toast（如名称重复）：模态保持打开，输入不丢
+    } catch (err) {
+      // 可定位错误（名称重复/端口占用等）就近内联到字段（顶部 toast 已由 run() 给出）：
+      // 模态保持打开，输入不丢
+      mapSubmitError(form, err, form.elements.serverPort);
+    } finally {
+      state.serverSaving = false;
+      setBusy(saveBtn, false);
     }
   });
 
@@ -2356,6 +2631,17 @@ function bindEvents() {
   // 新增/编辑模态：HTTP 由入口固定；端口服务统一入口，弹窗内协议默认 TCP 可切换
   $("btn-add-http").addEventListener("click", () => openServiceModal(t("action.addHttp"), null, "http"));
   $("btn-add-port").addEventListener("click", () => openServiceModal(t("action.addPort"), null, "tcp"));
+  // 首次使用引导：隧道空态/服务表单内「先添加 Frps 配置」→ 切配置 Tab 并直接打开新增模态
+  const gotoAddServer = () => {
+    if (state.serviceSaving) return; // 服务提交在途：不关闭不跳转（与 closeServiceModal 同防重开）
+    if (!$("service-modal").hidden) closeServiceModal(); // 服务模态开着先收起（用户主动跳转）
+    switchTab("servers");
+    openServerModal(null);
+  };
+  $("btn-empty-add-server").addEventListener("click", gotoAddServer);
+  $("btn-svc-add-server").addEventListener("click", gotoAddServer);
+  // 启动快照失败重试：重新拉取快照（成功后由 renderServices 收起错误态）
+  $("btn-boot-retry").addEventListener("click", retryBootSnapshot);
   // 弹窗内协议切换（TCP/UDP）：驱动字段组/图标兜底/地址预览刷新，并保留本次已选目标
   $("svc-proto-select").addEventListener("change", (e) => setServiceType(e.target.value, { preserveServer: true }));
   document.querySelectorAll("[data-close-modal]").forEach((el) => el.addEventListener("click", closeServiceModal));
@@ -2423,9 +2709,11 @@ function bindEvents() {
   });
   $("service-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (state.serviceSaving) return; // 提交在途：防双击重复创建隧道
     const form = $("service-form");
     const type = form.elements.type.value;
     const isPort = isPortType(type);
+    clearFieldErrors(form); // 提交开始：清上一轮字段错误
     // 先捕获编辑标记：closeServiceModal 会清 editingId，toast 依赖提交前的状态
     const wasEditing = Boolean(state.editingId);
     // 模态无 enabled 控件：创建默认启用；编辑保留该服务当前启用状态（用卡片开关切换）
@@ -2439,6 +2727,13 @@ function bindEvents() {
       toast("error", hasTargets ? t("pick.noTargetToast") : isPort ? t("pick.noServerToast") : t("pick.noHttpServerToast"));
       return;
     }
+    // 远程端口必填校验（端口类服务 1-65535 的整数）：内联字段错误，不再空值/非法值直接提交
+    const remotePortNum = Number(form.elements.remotePort.value);
+    if (isPort && !(Number.isInteger(remotePortNum) && remotePortNum >= 1 && remotePortNum <= 65535)) {
+      renderFieldError(form.elements.remotePort, t("form.remotePortInvalid"));
+      form.elements.remotePort.focus();
+      return;
+    }
     const input = {
       name: form.elements.name.value.trim(),
       localHost: form.elements.localHost.value.trim() || "127.0.0.1",
@@ -2446,21 +2741,31 @@ function bindEvents() {
       subdomain: isPort ? "" : form.elements.subdomain.value.trim(),
       enabled: editingSvc ? editingSvc.enabled : true,
       type,
-      remotePort: isPort ? Number(form.elements.remotePort.value) || 0 : 0,
+      remotePort: isPort ? remotePortNum : 0,
       icon: modalIcon, // 空串 = 未设置，后端展示层按类型兜底
       serverId, // 目标 Frps；runtime 迁移失败由后端报错，原因提示后保留新归属不回滚
     };
+    const opKey = wasEditing ? "run.saveService" : "run.createService";
+    const saveBtn = form.querySelector('button[type="submit"]');
+    state.serviceSaving = true;
+    setBusy(saveBtn, true, t("generic.saving")); // 保存按钮忙态：禁用 + 「保存中…」
     try {
       const snapshot = wasEditing
-        ? await run("run.saveService", () => api.AppService.UpdateService(state.editingId, input))
-        : await run("run.createService", () => api.AppService.CreateService(input));
+        ? await run(opKey, () => api.AppService.UpdateService(state.editingId, input))
+        : await run(opKey, () => api.AppService.CreateService(input));
+      state.serviceSaving = false; // 成功：先解除在途，再关闭（closeServiceModal 会拦在途关闭）
       setLastServer(type, serverId); // 记住本次选择供下次新建（按类型分键：http/tcp/udp）
       closeServiceModal();
       applyConfigOnly(snapshot);
       toast("success", wasEditing ? t("toast.serviceUpdated") : t("toast.serviceAdded"));
-    } catch {
-      // 失败原因已由 run() toast 呈现（如 runtime 迁移失败）：模态保持打开，
-      // 用户输入与新选择的归属均保留，不自动回滚
+    } catch (err) {
+      // 可定位错误（名称重复/端口占用等）就近内联到字段（顶部 toast 已由 run() 给出）：
+      // 模态保持打开，用户输入与新选择的归属均保留，不自动回滚。
+      // 端口字段按服务类型落位：端口服务 → 远程端口，HTTP → 本地端口
+      mapSubmitError(form, err, isPort ? form.elements.remotePort : form.elements.localPort);
+    } finally {
+      state.serviceSaving = false;
+      setBusy(saveBtn, false);
     }
   });
 
@@ -2645,12 +2950,24 @@ function onServiceListClick(e) {
   }
 }
 
+// currentServiceToggle：按服务 id 取当前列表里的启用开关（重绘后旧节点失效，需重新定位）
+function currentServiceToggle(id) {
+  for (const item of $("service-list").querySelectorAll(".service-item")) {
+    if (item.dataset.id === id) return item.querySelector("input[data-act='toggle']");
+  }
+  return null;
+}
+
 function onServiceListToggle(e) {
   const toggle = e.target.closest("input[data-act='toggle']");
   if (!toggle) return;
   const id = toggle.closest(".service-item").dataset.id;
+  if (state.togglePending.has(id)) return; // 双保险（disabled 已兜底）：在途忽略本次点击
+  state.togglePending.add(id);
+  toggle.disabled = true; // 在途禁点：快速连点不产生并发的 SetServiceEnabled，后到响应不覆盖最后意图
   state.listRenderHoldUntil = Date.now() + 600; // 动画保护窗：期间 app:snapshot 不重建卡列表
-  run("run.toggleService", () => api.AppService.SetServiceEnabled(id, toggle.checked))
+  const desired = toggle.checked;
+  run("run.toggleService", () => api.AppService.SetServiceEnabled(id, desired))
     .then((snapshot) => {
       // 轻量更新：只改该服务的 enabled + 刷新计数等轻量部位；
       // 不整卡重绘（renderServices 会重建 switch，160ms 位移动画被截断）
@@ -2665,8 +2982,17 @@ function onServiceListToggle(e) {
       }
     })
     .catch(() => {
-      // 失败回弹：后端未变更，恢复用户点击前的视觉状态（error toast 由 run() 给出）
-      toggle.checked = !toggle.checked;
+      // 失败回弹：后端未变更，恢复用户点击前的视觉状态（error toast 由 run() 给出）。
+      // 列表可能在途间被事件重绘，优先按 id 重新定位当前开关
+      const cur = currentServiceToggle(id) ?? toggle;
+      cur.checked = !desired;
+    })
+    .finally(() => {
+      state.togglePending.delete(id);
+      // 恢复可点：同样按 id 重新定位（重绘后的新 switch 在 renderServices 中按
+      // togglePending 渲染为 disabled，此处统一解除）
+      const cur = currentServiceToggle(id);
+      if (cur) cur.disabled = false;
     });
 }
 
@@ -2882,6 +3208,28 @@ function onServerListClick(e) {
 
 // ---------- 启动 ----------
 
+// renderBootError：启动快照拉取失败（重试耗尽）——列表区显示错误态与「重试」按钮；
+// 成功后由 renderServices 统一收起错误态（重试成功或 app:snapshot 事件到达均可）。
+// 错误详情为后端原文（不进词典），截断防撑坏布局。
+function renderBootError(err) {
+  const box = $("boot-error");
+  if (!box) return;
+  $("service-empty").style.display = "none";
+  $("boot-error-msg").textContent = briefText(String(err?.message ?? err ?? ""), 160);
+  box.hidden = false;
+}
+
+// retryBootSnapshot：重试拉取快照。失败原因已 toast（run()），错误态保留可再次重试；
+// 成功走 applySnapshot → renderServices 收起错误态。期间按钮禁用防连点。
+async function retryBootSnapshot() {
+  const btn = $("btn-boot-retry");
+  if (btn) btn.disabled = true;
+  try {
+    applySnapshot(await run("run.loadConfig", () => api.AppService.Snapshot()));
+  } catch {} // 失败：错误态保留，用户可再次重试
+  if (btn) btn.disabled = false;
+}
+
 async function boot() {
   initLanguage(); // 语言必须在主题/事件绑定前应用：静态文案/按钮 tip 随偏好
   initTheme();
@@ -2902,6 +3250,10 @@ async function boot() {
     // 语言对齐：后端为权威（配置偏好 + 解析后的 resolved）；拉取期间用户已切语言则不覆盖
     reconcileLanguageFromSnapshot(snapRes.value, langSeqAtBoot);
     applySnapshot(snapRes.value);
+  } else if (snapRes.status === "rejected") {
+    // 快照重试耗尽仍失败：列表区渲染错误态 + 重试入口，
+    // 不落到「还没有穿透服务」的误导空态（模式对齐统计面板 loadFailTitle）
+    renderBootError(snapRes.reason);
   }
   if (logRes.status === "fulfilled" && logRes.value) {
     mergeLogs(logRes.value); // 合并非覆盖：拉取期间 app:logs 事件已到的更晚日志不丢
@@ -2982,4 +3334,7 @@ export const __test = {
   launchSync,
   // 诊断通道英文详情过滤（本地化错误不回流日志通道）
   enDetail,
+  // 背景圈定嵌套恢复与字段错误清理（供验证脚本直接驱动真实代码路径）
+  setBgInert,
+  clearFieldErrors,
 };

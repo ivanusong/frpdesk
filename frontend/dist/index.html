@@ -97,7 +97,17 @@
         <!-- Tab 1：服务列表 -->
         <section class="panel is-active" id="tab-tunnels" role="tabpanel" data-i18n-aria="tab.tunnels">
           <div class="service-list" id="service-list">
-            <p class="empty" id="service-empty" data-i18n="empty.services">还没有穿透服务，点右上角「新增」。</p>
+            <!-- 空态：文案 + 首次使用引导（无 Frps 配置时一键跳配置页打开新增模态） -->
+            <p class="empty" id="service-empty">
+              <span data-i18n="empty.services">还没有穿透服务，点右上角新增服务。</span>
+              <button class="btn btn-sm" id="btn-empty-add-server" type="button" data-i18n="empty.addServerFirst">先添加 Frps 配置</button>
+            </p>
+            <!-- 启动快照拉取失败（重试耗尽）的错误态：替代误导性的「还没有穿透服务」空态 -->
+            <div class="empty" id="boot-error" hidden>
+              <p data-i18n="boot.loadFailTitle">启动数据加载失败</p>
+              <p class="mono" id="boot-error-msg"></p>
+              <button class="btn btn-sm" id="btn-boot-retry" type="button" data-i18n="generic.retry">重试</button>
+            </div>
           </div>
         </section>
 
@@ -260,11 +270,12 @@
             <label>
               <span class="field-head">
                 <span class="field-title" data-i18n="form.remotePort">远程端口</span>
+                <span class="field-badge" data-i18n="form.requiredBadge">必填</span>
                 <button type="button" class="field-help" data-help="form.remotePortHelp" data-i18n-aria="form.remotePortHelpAria">
                   <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
                 </button>
               </span>
-              <input name="remotePort" type="number" min="1" max="65535" inputmode="numeric" data-i18n-placeholder="form.remotePortPh" placeholder="例如：36000" />
+              <input name="remotePort" type="number" min="1" max="65535" inputmode="numeric" required data-i18n-placeholder="form.remotePortPh" placeholder="例如：36000" />
             </label>
           </div>
           <!-- 服务器归属：选择变化时提示新访问地址与短暂中断（保存前不触后端） -->
@@ -275,6 +286,8 @@
               <div class="select-wrap select-inline">
                 <select name="serverId" id="svc-server-select"></select>
               </div>
+              <!-- 无可用 Frps 配置时的就地引导入口（syncServerSelect 按合格目标显隐） -->
+              <button type="button" class="btn btn-sm" id="btn-svc-add-server" hidden data-i18n="empty.addServerFirst">先添加 Frps 配置</button>
             </label>
             <button type="button" class="btn" data-close-modal data-i18n="generic.cancel">取消</button>
             <button type="submit" class="btn btn-primary" data-i18n="generic.save">保存</button>
@@ -371,7 +384,8 @@
     <!-- ===== 访问二维码小弹窗（卡片二维码按钮打开）===== -->
     <div class="modal qr-modal" id="qr-modal" hidden>
       <div class="modal-overlay" data-close-qr></div>
-      <div class="modal-panel qr-panel" role="dialog" aria-modal="true" data-i18n-aria="qr.aria">
+      <!-- qr-panel 可聚焦（tabindex=-1）：打开时焦点移入弹窗，关闭归还触发按钮 -->
+      <div class="modal-panel qr-panel" id="qr-panel" tabindex="-1" role="dialog" aria-modal="true" data-i18n-aria="qr.aria">
         <div class="qr-box" id="qr-box"></div>
         <p class="qr-url" id="qr-url"></p>
       </div>

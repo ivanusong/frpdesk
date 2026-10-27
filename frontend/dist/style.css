@@ -1,20 +1,24 @@
 /* ===== 设计 token（唯一来源）：亮/暗两套 ===== */
 :root {
+  color-scheme: light;
   /* 浅色 */
   --bg: #f4f5f7;
   --surface: #ffffff;
   --surface-2: #eef0f3;
   --surface-3: #e4e7ec;
   --border: #e0e3e9;
+  --border-field: #8b94a3; /* 表单控件边框：对控件底约 3:1（WCAG 1.4.11）；卡片/分割线仍用 --border */
   --text: #1c2128;
   --text-2: #5c6572;
-  --text-3: #98a0ad;
-  --primary: #3e9468;
-  --primary-hover: #337f58;
-  --primary-soft: rgba(62, 148, 104, 0.12);
+  --text-3: #616b78;
+  --primary: #337f58;
+  --primary-hover: #2b6e4c;
+  /* 品牌绿拆分：填充/边框/焦点环走 --primary（白字 4.86:1），文字与图标走 --primary-text（白底 6.08:1） */
+  --primary-text: #2b6e4c;
+  --primary-soft: color-mix(in srgb, var(--primary) 12%, transparent);
   /* 品牌转低饱和绿后与原 success 绿色相重叠（hsl 145≈147），--ok 移至 teal 色相保持语义可分 */
-  --ok: #0d9488;
-  --warn: #d97706;
+  --ok: #0f766e;
+  --warn: #b45309;
   --stat-3xx: #64748b; /* 状态码文字 3xx 蓝灰（浅色） */
   /* 设备类别图表语义色（浅色）：桌面蓝 / 移动绿 / 平板琥珀 / 爬虫紫 / 其他灰 */
   --chart-desktop: #4e7fbe;
@@ -24,14 +28,15 @@
   --chart-other: #98a0ad;
   --danger: #dc2626;
   --danger-hover: #b91c1c;
-  --danger-soft: rgba(220, 38, 38, 0.08);
+  --danger-fill: #dc2626; /* 实心危险按钮背景（白字 4.83:1）；--danger 仍作文字/描边色 */
+  --danger-soft: color-mix(in srgb, var(--danger) 8%, transparent);
   /* 实心彩底按钮的文字墨色：浅色主题彩底较深，用白字 */
   --primary-ink: #ffffff;
   --danger-ink: #ffffff;
   --overlay: rgba(18, 21, 27, 0.45);
   --log-bg: #131822;
   --log-text: #c6d2e2;
-  --log-time: #5c6879;
+  --log-time: #78849a;
   --log-error: #f87171;
   --shadow: 0 8px 28px rgba(15, 20, 30, 0.16);
 
@@ -50,22 +55,26 @@
 
 /* 深色：中性深灰蓝底（非纯黑）*/
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #0f1115;
   --surface: #171a21;
   --surface-2: #1e222b;
   --surface-3: #262b36;
   --border: #2b313d;
+  --border-field: #5c6678; /* 表单控件边框：对控件底约 3:1（WCAG 1.4.11） */
   --text: #e7eaf0;
   --text-2: #a2abba;
-  --text-3: #6d7684;
+  --text-3: #858e9e;
   --primary: #6cbf92;
   --primary-hover: #82cba4;
-  --primary-soft: rgba(108, 191, 146, 0.16);
+  --primary-text: #6cbf92; /* 深色品牌绿对深底已达 4.5:1，文字/填充同色 */
+  --primary-soft: color-mix(in srgb, var(--primary) 16%, transparent);
   --ok: #2dd4bf;
   --warn: #f59e0b;
   --danger: #ef4444;
   --danger-hover: #dc2626;
-  --danger-soft: rgba(239, 68, 68, 0.12);
+  --danger-fill: #c62828; /* 实心危险按钮背景：加深保白字对比；--danger 仍作文字/描边色 */
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
   --stat-3xx: #8fa3bd; /* 状态码文字 3xx 蓝灰（深色） */
   /* 设备类别图表语义色（深色） */
   --chart-desktop: #86abe0;
@@ -79,7 +88,7 @@
   --overlay: rgba(0, 0, 0, 0.55);
   --log-bg: #0c0f14;
   --log-text: #c6d2e2;
-  --log-time: #55606f;
+  --log-time: #737f91;
   --log-error: #f87171;
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
 }
@@ -87,22 +96,26 @@
 /* 跟随系统：未显式指定主题时由系统偏好决定 */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    color-scheme: dark;
     --bg: #0f1115;
     --surface: #171a21;
     --surface-2: #1e222b;
     --surface-3: #262b36;
     --border: #2b313d;
+    --border-field: #5c6678; /* 表单控件边框：对控件底约 3:1（WCAG 1.4.11） */
     --text: #e7eaf0;
     --text-2: #a2abba;
-    --text-3: #6d7684;
+    --text-3: #858e9e;
     --primary: #6cbf92;
     --primary-hover: #82cba4;
-    --primary-soft: rgba(108, 191, 146, 0.16);
+    --primary-text: #6cbf92; /* 深色品牌绿对深底已达 4.5:1，文字/填充同色 */
+    --primary-soft: color-mix(in srgb, var(--primary) 16%, transparent);
     --ok: #2dd4bf;
     --warn: #f59e0b;
     --danger: #ef4444;
     --danger-hover: #dc2626;
-    --danger-soft: rgba(239, 68, 68, 0.12);
+    --danger-fill: #c62828; /* 实心危险按钮背景：加深保白字对比；--danger 仍作文字/描边色 */
+    --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
     --stat-3xx: #8fa3bd;
     --chart-desktop: #86abe0;
     --chart-mobile: #62c99b;
@@ -114,7 +127,7 @@
     --overlay: rgba(0, 0, 0, 0.55);
     --log-bg: #0c0f14;
     --log-text: #c6d2e2;
-    --log-time: #55606f;
+    --log-time: #737f91;
     --log-error: #f87171;
     --shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
   }
@@ -218,7 +231,7 @@ body {
 }
 
 .btn-danger {
-  background: var(--danger);
+  background: var(--danger-fill); /* 实心底用 --danger-fill：深色下加深保白字对比，描边仍走 --danger */
   border-color: var(--danger);
   color: var(--danger-ink);
   font-weight: 600;
@@ -347,7 +360,7 @@ body {
 
 .settings-option.is-active {
   background: var(--primary-soft);
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
 }
 
@@ -531,7 +544,7 @@ html[data-no-mac] .titlebar {
 
 
 .tab.is-active {
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
 }
 
@@ -631,7 +644,7 @@ html[data-no-mac] .titlebar {
   appearance: none;
   width: 100%;
   padding: 7px 28px 7px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-field);
   border-radius: 7px;
   font-size: 13px;
   font-family: inherit;
@@ -713,7 +726,7 @@ html[data-no-mac] .titlebar {
 
 @media (hover: hover) and (pointer: fine) {
   .field-help:hover {
-    color: var(--primary);
+    color: var(--primary-text);
     transform: scale(1.08);
   }
 }
@@ -739,7 +752,7 @@ html[data-no-mac] .titlebar {
 .form input[type="text"],
 .form input[type="number"],
 .form input[type="password"] {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-field);
   border-radius: 7px;
   padding: 7px 10px;
   font-size: 13px;
@@ -753,6 +766,21 @@ html[data-no-mac] .titlebar {
 .form input:focus {
   outline: 2px solid color-mix(in srgb, var(--primary) 40%, transparent);
   border-color: var(--primary);
+}
+
+/* 占位符：统一最弱层级色并关闭浏览器默认降透明（配合 color-scheme 修复深色下按亮色渲染） */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3);
+  opacity: 1;
+}
+
+/* 字段校验错误文案（契约样式：JS 会在表单字段下插入 <div class="field-error">） */
+.field-error {
+  color: var(--danger);
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin-top: 4px;
 }
 
 .form-row {
@@ -999,7 +1027,7 @@ html[data-no-mac] .titlebar {
 }
 
 .tag-tcp {
-  color: var(--primary);
+  color: var(--primary-text);
   border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
 }
 
@@ -1025,7 +1053,7 @@ html[data-no-mac] .titlebar {
 }
 
 .tag-proxy {
-  color: var(--primary);
+  color: var(--primary-text);
   border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
 }
 
@@ -1050,7 +1078,7 @@ html[data-no-mac] .titlebar {
 }
 
 .service-meta a {
-  color: var(--primary);
+  color: var(--primary-text);
   text-decoration: none;
 }
 
@@ -1373,7 +1401,7 @@ button.service-icon:focus-visible {
 }
 
 .empty {
-  color: var(--text-3);
+  color: var(--text-2); /* 空态是主引导文案：用次级文字色而非最弱层级 */
   text-align: center;
   padding: 24px 0;
   margin: 0;
@@ -1492,7 +1520,7 @@ button.service-icon:focus-visible {
    专用 .server-http-toggle 类避免被 .form label 的列布局覆写：
    head 为「标题左 / 开关右」单行，label 整行可点（原生 change，不手动 click） */
 .server-http-toggle {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-field);
   border-radius: 8px;
   padding: 10px 12px;
   display: flex;
@@ -1629,10 +1657,10 @@ button.service-icon:focus-visible {
   display: block;
 }
 
-/* 生成中/失败占位：盒内恒为白底，用固定灰不随主题 token */
+/* 生成中/失败占位：盒内恒为白底，用固定灰不随主题 token（对白底 5.9:1） */
 .qr-loading {
   font-size: 12px;
-  color: #98a0ad;
+  color: #616b78;
 }
 
 .qr-url {
@@ -1824,7 +1852,7 @@ button.service-icon:focus-visible {
 }
 
 .toast--info .icon {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .toast-text {
