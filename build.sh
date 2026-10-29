@@ -5,6 +5,7 @@
 # 用法：
 #   bash build.sh                                  # 缺省目标：macOS 主机四目标；Linux 主机本机架构
 #   bash build.sh darwin/arm64 windows/arm64 ...   # 显式选择目标（os/arch，可任意组合）
+#   bash build.sh cli/linux/amd64 cli/linux/arm64  # 无头服务端 CLI（纯 Go，可 macOS 交叉构建）
 #   bash build.sh --print-version                  # 只解析并打印版本号，不构建
 #
 # 可选环境变量：
@@ -22,16 +23,20 @@
 #   frpdesk-<版本>-windows-<arch>.exe     单文件 exe（-H windowsgui）；
 #   frpdesk-<版本>-linux-<arch>.tar.gz    顶层单一可执行（updater 归档硬约束，见
 #                                         scripts/package-linux.sh）；darwin 的 .app
-#                                         bundle 也留在 bin/ 供本地运行。
+#                                         bundle 也留在 bin/ 供本地运行；
+#   frpdesk-cli-<版本>-linux-<arch>.tar.gz  无头服务端 CLI（server tag，CGO_ENABLED=0），
+#                                         包内可执行名同为 frpdesk；不进入桌面 updater 清单。
 # 与 Taskfile.yml 同一套构建约定（production tag / trimpath / 最低 macOS 12），
 # Taskfile 继续负责本地开发（run / wails3 dev），本脚本只管分发产物。
 #
 # 说明：
 #   - macOS 主机：darwin 走 CGO + WebKit（amd64 靠 clang 多架构交叉）；windows 走
 #     纯 Go WebView2（CGO_ENABLED=0）交叉编译，每架构各自生成 rsrc_windows_<arch>.syso；
-#   - linux 目标必须在同架构 Linux 主机构建：Wails Linux 走 CGO + GTK4/webkitgtk-6.0
+#   - linux 桌面目标必须在同架构 Linux 主机构建：Wails Linux 走 CGO + GTK4/webkitgtk-6.0
 #     （third_party/wails/pkg/application/linux_cgo.go），不做 Mac 伪交叉；
 #     Ubuntu 依赖：libgtk-4-dev libwebkitgtk-6.0-dev（gcc/pkg-config Runner 预装）；
+#   - cli/linux/<arch> 是独立无头构建（Wails server tag，无 GUI/CGO），任何主机均可
+#     交叉编译；产物与桌面 Linux 包同名可执行 frpdesk，但包名带 -cli- 前缀区分；
 #   - 依赖 go 与 wails3，缺失时按提示安装（安装位置兼容 mise 的 GOBIN）：
 #     go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.28
 #
@@ -76,6 +81,8 @@ fi
 if [ -n "$UPDATE_MIRROR_BASE_URL" ]; then
     BUILD_LDFLAGS="$BUILD_LDFLAGS -X main.updateMirrorBaseURL=${UPDATE_MIRROR_BASE_URL}"
 fi
+# 服务端 CLI 无应用内更新，不注入更新源；只保留版本号
+CLI_LDFLAGS="-w -s -X main.currentVersion=${VERSION}"
 
 C_GREEN='\033[0;32m'; C_RED='\033[0;31m'; C_RESET='\033[0m'
 info() { printf "${C_GREEN}[构建]${C_RESET} %s\n" "$*"; }
@@ -109,15 +116,16 @@ fi
 
 # ---- 构建目标 ================================================================
 
-# 支持的目标（os/arch）；linux 必须在同架构 Linux 主机构建（CGO + GTK4/webkitgtk-6.0，
-# 见 third_party/wails/pkg/application/linux_cgo.go），不做 Mac 伪交叉。
+# 支持的目标（os/arch）；linux 桌面目标必须在同架构 Linux 主机构建（CGO + GTK4/
+# webkitgtk-6.0，见 third_party/wails/pkg/application/linux_cgo.go），不做 Mac 伪交叉。
+# cli/linux/<arch> 为独立无头构建（CGO_ENABLED=0），不受此主机限制。
 TARGETS=()
 if [ $# -gt 0 ]; then
     for arg in "$@"; do
         case "$arg" in
-            darwin/arm64|darwin/amd64|windows/amd64|windows/arm64|linux/amd64|linux/arm64)
+            darwin/arm64|darwin/amd64|windows/amd64|windows/arm64|linux/amd64|linux/arm64|cli/linux/amd64|cli/linux/arm64)
                 TARGETS+=("$arg") ;;
-            *) err "未知构建目标：${arg}（可用：darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 linux/amd64 linux/arm64）"; exit 1 ;;
+            *) err "未知构建目标：${arg}（可用：darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 linux/amd64 linux/arm64 cli/linux/amd64 cli/linux/arm64）"; exit 1 ;;
         esac
     done
 fi
@@ -267,27 +275,47 @@ build_linux() {
     info "linux/${arch} 完成 → ${BIN_DIR}/${APP_NAME}-${VERSION}-linux-${arch}.tar.gz"
 }
 
+# 服务端 CLI（Wails server tag，纯 Go；Linux 双架构可 macOS 交叉构建）
+build_cli_linux() {
+    local arch="$1"
+    info "构建 cli/linux/${arch}..."
+    CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+        go build -tags 'server production' -trimpath -ldflags="${CLI_LDFLAGS}" \
+        -o "${BIN_DIR}/${APP_NAME}-cli-linux-${arch}" .
+    # 与桌面 Linux 包同一打包约定：包内顶层单一可执行 frpdesk
+    "$SCRIPT_DIR/scripts/package-linux.sh" "${BIN_DIR}/${APP_NAME}-cli-linux-${arch}" \
+        "${BIN_DIR}/${APP_NAME}-cli-${VERSION}-linux-${arch}.tar.gz"
+    rm -f "${BIN_DIR}/${APP_NAME}-cli-linux-${arch}"
+    info "cli/linux/${arch} 完成 → ${BIN_DIR}/${APP_NAME}-cli-${VERSION}-linux-${arch}.tar.gz"
+}
+
+HAS_DESKTOP_TARGET=0
 for target in "${TARGETS[@]}"; do
+    case "$target" in cli/linux/*) ;; *) HAS_DESKTOP_TARGET=1 ;; esac
     case "$target" in
-        darwin/*)  build_darwin "${target##*/}" ;;
-        windows/*) build_windows "${target##*/}" ;;
-        linux/*)   build_linux "${target##*/}" ;;
+        cli/linux/*) build_cli_linux "${target##*/}" ;;
+        darwin/*)    build_darwin "${target##*/}" ;;
+        windows/*)   build_windows "${target##*/}" ;;
+        linux/*)     build_linux "${target##*/}" ;;
     esac
 done
 
-if [ -n "$UPDATE_MANIFEST_URL" ]; then
-    if [ -n "$UPDATE_MIRROR_BASE_URL" ]; then
-        info "已注入客户端更新主源（stable.json）与镜像源：${UPDATE_MIRROR_BASE_URL}"
+# CLI 构建不消费更新源，也没有桌面安装包，跳过相关提示与许可邻接文件。
+if [ "$HAS_DESKTOP_TARGET" -eq 1 ]; then
+    if [ -n "$UPDATE_MANIFEST_URL" ]; then
+        if [ -n "$UPDATE_MIRROR_BASE_URL" ]; then
+            info "已注入客户端更新主源（stable.json）与镜像源：${UPDATE_MIRROR_BASE_URL}"
+        else
+            info "已注入客户端更新主源（stable.json）"
+        fi
+    elif [ -n "$UPDATE_MIRROR_BASE_URL" ]; then
+        info "已注入镜像更新源：${UPDATE_MIRROR_BASE_URL}"
     else
-        info "已注入客户端更新主源（stable.json）"
+        info "未配置更新源：应用内更新检查将禁用"
     fi
-elif [ -n "$UPDATE_MIRROR_BASE_URL" ]; then
-    info "已注入镜像更新源：${UPDATE_MIRROR_BASE_URL}"
-else
-    info "未配置更新源：应用内更新检查将禁用"
-fi
 
-# Windows EXE 的许可文档作为邻接文件分发；CI 同时打为 licenses.zip。
-"$SCRIPT_DIR/scripts/stage-license-docs.sh" "$BIN_DIR"
+    # Windows EXE 的许可文档作为邻接文件分发；CI 同时打为 licenses.zip。
+    "$SCRIPT_DIR/scripts/stage-license-docs.sh" "$BIN_DIR"
+fi
 
 info "全部完成（版本 ${VERSION}；目标：${TARGETS[*]}），产物在 ${BIN_DIR}/"

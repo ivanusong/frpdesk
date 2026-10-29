@@ -16,6 +16,34 @@ func newTestStore(t *testing.T) *Store {
 	return newStore(filepath.Join(t.TempDir(), "config.json"))
 }
 
+// TestSaveUsesPrivatePermissions 配置可能包含明文 frp token：保存时目录和文件
+// 都只能被当前用户访问，且已有宽松权限会被收紧。
+func TestSaveUsesPrivatePermissions(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatalf("预设宽松目录权限失败: %v", err)
+	}
+	path := filepath.Join(dir, "config.json")
+	s := newStore(path)
+	mustCreateServer(t, s, testServerInput("private", "example.com", 7000, false))
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("检查配置目录失败: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("配置目录权限 = %04o，want 0700", got)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("检查配置文件失败: %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("配置文件权限 = %04o，want 0600", got)
+	}
+}
+
 func mustCreateServer(t *testing.T, s *Store, input ServerInput) ServerConfig {
 	t.Helper()
 	cfg, err := s.CreateServer(input)

@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !server
 
 // 非 macOS 平台无 Dock 激活策略与标准窗口按钮概念：窗口 Show/Focus 即可，
 // 保持 Windows CGO_ENABLED=0 纯 Go 交叉构建可用。

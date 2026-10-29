@@ -104,7 +104,7 @@ func (h *serverApp) run() error {
 		shutdownTimeout = 30 * time.Second
 	}
 
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 
 	// Create HTTP handler from asset server
 	handler := h.createHandler()

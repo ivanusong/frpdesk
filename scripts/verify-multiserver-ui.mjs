@@ -462,6 +462,12 @@ const appStub = {
     this.record("FrontendLog", [level, message]);
     return Promise.resolve();
   },
+  // 运行模式（前端启动时读取一次）：默认桌面；测试可改为 "server" 验证无头模式。
+  runtimeInfo: { mode: "desktop", version: "0.0.0" },
+  RuntimeInfo() {
+    this.calls.push({ name: "RuntimeInfo", args: [] });
+    return Promise.resolve({ ...this.runtimeInfo });
+  },
   UpdateInfo() {
     return Promise.resolve({ currentVersion: "0.0.0", state: "idle" });
   },
@@ -598,6 +604,13 @@ check("selector：HTTP 过滤 httpEnabled、TCP/UDP 全部", T.eligibleServers("
 // ---------- 场景 S2：boot 后初始渲染 ----------
 const snapshot = T.state.snapshot;
 check("boot 后快照加载", Boolean(snapshot) && snapshot.config.servers.length === 2);
+check("运行模式：boot 读取 RuntimeInfo（桌面默认）", T.state.runtime.mode === "desktop" && !T.isServerMode());
+check(
+  "服务端模式：首帧标记与桌面入口隐藏规则存在",
+  html.includes("__FRPDESK_SERVER__") &&
+    css.includes('html[data-runtime-mode="server"] #btn-quit') &&
+    css.includes('html[data-runtime-mode="server"] .settings-group--launch'),
+);
 check("服务器卡片渲染两列数据（2 张）", document.querySelectorAll("#server-list .server-item").length === 2);
 check("底部计数 = 当前已映射隧道数（boot 无注册事件为 0）", document.getElementById("service-count").textContent === "0", document.getElementById("service-count").textContent);
 check("计数 title 简短口径", (document.getElementById("service-count").title || "").includes("当前已映射隧道数量"), document.getElementById("service-count").title);

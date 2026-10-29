@@ -18,6 +18,8 @@ vars:
   GOARCH_VALUE: 'arm64'
   # wails3 dev -port 传入的变量名是 WAILS_VITE_PORT
   VITE_PORT: '{{.WAILS_VITE_PORT | default "9245"}}'
+  # task cli:run 透传参数，例如：task cli:run CLI_ARGS="--host 0.0.0.0 --port 9000"
+  CLI_ARGS: ''
 
 tasks:
   # 生成前端 bindings（wails3 自带工具，不依赖 npm）
@@ -80,3 +82,17 @@ tasks:
       - go run -tags dev .
     env:
       CGO_ENABLED: '1'
+
+  # 无头服务端 CLI：Linux amd64/arm64 双架构 tar.gz（纯 Go 交叉，产物名 frpdesk-cli-*）
+  # build.sh 内部负责生成/同步 bindings，无需重复依赖 build:frontend
+  cli:build:
+    cmds:
+      - bash build.sh cli/linux/amd64 cli/linux/arm64
+
+  # 本机以服务端模式运行（server + production tag；默认 127.0.0.1:8080）
+  cli:run:
+    deps: [build:frontend]
+    cmds:
+      - go run -tags 'server production' . serve {{.CLI_ARGS}}
+    env:
+      CGO_ENABLED: '0'

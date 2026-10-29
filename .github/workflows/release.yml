@@ -1,10 +1,11 @@
 # 发布工作流：推送 annotated 的 v x.y.z tag 触发。版本只来自 tag（scripts/tag-version.sh，
 # 不读取仓库内版本文件），发布日志（GitHub Release 描述与 updater stable.json notes）
 # 也取自 tag 描述（scripts/tag-release-notes.sh，轻量 tag 或描述为空直接失败）。
-# 结构：test（单测/前端校验）→ build（矩阵：macOS 一台出 darwin+windows 四包，
-# ubuntu-24.04 / ubuntu-24.04-arm 原生出 linux 两包）→ release（聚合六平台产物生成
-# stable.json，draft 上传 8 个资产核验齐全后发布）→ sync-mirror（只消费已发布资产，
-# 不重新构建）。所有构建均检出 tag 所指代码，绝不把 main 代码打包成 tag 版本。
+# 结构：test（单测/前端校验）→ build（矩阵：macOS 一台出 darwin+windows 四包与
+# Linux CLI 双架构包，ubuntu-24.04 / ubuntu-24.04-arm 原生出 linux 桌面两包）→
+# release（聚合六平台桌面产物生成 stable.json，draft 上传 10 个资产核验齐全后发布）→
+# sync-mirror（只消费已发布资产，不重新构建）。CLI 包随 Release 分发但不进入桌面
+# updater stable.json。所有构建均检出 tag 所指代码，绝不把 main 代码打包成 tag 版本。
 # 与本地私有发布流程（MinIO/rclone）无关；普通 Build 工作流保持只读、不发布。
 name: Release
 
@@ -42,6 +43,14 @@ jobs:
       - name: 单元测试
         run: go test ./...
 
+      - name: 服务端 CLI 单元测试（server + production 构建标签）
+        run: go test -tags 'server production' ./...
+
+      - name: 服务端 CLI IPv6 生命周期测试（Wails 单进程限制，单独运行）
+        env:
+          FRPDESK_TEST_SERVE_HOST: '::1'
+        run: go test -tags 'server production' -run TestServerLifecycle -count=1 .
+
       - name: 前端多服务端行为验证（零依赖 Node 脚本）
         run: node scripts/verify-multiserver-ui.mjs
 
@@ -57,10 +66,11 @@ jobs:
         include:
           - os: macos-latest
             slug: mac
-            targets: darwin/arm64 darwin/amd64 windows/amd64 windows/arm64
+            targets: darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 cli/linux/amd64 cli/linux/arm64
             artifact_paths: |
               bin/frpdesk-*-darwin-*.zip
               bin/frpdesk-*-windows-*.exe
+              bin/frpdesk-cli-*-linux-*.tar.gz
           - os: ubuntu-24.04
             slug: linux-amd64
             targets: linux/amd64
@@ -171,7 +181,7 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           "$(go env GOPATH)/bin/wails3" version
 
-      - name: 下载各平台构建产物（聚合到 dist/，六平台共八资产中的六个用户包）
+      - name: 下载各平台构建产物（聚合到 dist/，六平台桌面包 + Linux CLI 双架构）
         uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -208,7 +218,41 @@ jobs:
           # 逐产物核对摘要，清单缺失/损坏时在发布前失败
           wails3 updater verify -manifest dist/stable.json -dir dist
 
-      - name: 创建 Draft Release 并上传 8 个资产
+      - name: 核验 Linux CLI 归档（顶层单一 frpdesk、可执行位、目标架构）
+        # CLI 包不进入 stable.json，单独核验打包契约，避免坏包随 Release 分发
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            archive="dist/frpdesk-cli-${VERSION}-linux-${arch}.tar.gz"
+            if [ ! -f "$archive" ]; then
+              echo "[release] 缺少 CLI 产物：$archive" >&2
+              exit 1
+            fi
+            entries="$(tar -tzf "$archive")"
+            if [ "$entries" != "frpdesk" ]; then
+              echo "[release] $archive 顶层必须只有 frpdesk，实际：$entries" >&2
+              exit 1
+            fi
+            verify_dir="$RUNNER_TEMP/cli-verify-${arch}"
+            rm -rf "$verify_dir"
+            mkdir -p "$verify_dir"
+            tar -xzf "$archive" -C "$verify_dir"
+            if [ ! -x "$verify_dir/frpdesk" ]; then
+              echo "[release] $archive 内 frpdesk 缺少可执行位" >&2
+              exit 1
+            fi
+            desc="$(file -b "$verify_dir/frpdesk")"
+            case "$arch" in
+              amd64) echo "$desc" | grep -q "x86-64" ;;
+              arm64) echo "$desc" | grep -q "ARM aarch64" ;;
+            esac || {
+              echo "[release] $archive 架构不符（${arch}）：$desc" >&2
+              exit 1
+            }
+            echo "[release] CLI ${arch} 核验通过：$desc"
+          done
+
+      - name: 创建 Draft Release 并上传 10 个资产
         # gh help release create 说明直接带资产会先建 draft、传完再发布；为不依赖
         # Runner 上 gh 版本的具体实现，这里显式走 draft → upload → edit 发布。
         env:
@@ -229,6 +273,8 @@ jobs:
             "dist/frpdesk-${VERSION}-windows-arm64.exe" \
             "dist/frpdesk-${VERSION}-linux-amd64.tar.gz" \
             "dist/frpdesk-${VERSION}-linux-arm64.tar.gz" \
+            "dist/frpdesk-cli-${VERSION}-linux-amd64.tar.gz" \
+            "dist/frpdesk-cli-${VERSION}-linux-arm64.tar.gz" \
             "dist/frpdesk-${VERSION}-licenses.zip" \
             "dist/stable.json"
 
@@ -245,6 +291,8 @@ jobs:
               "frpdesk-${VERSION}-windows-arm64.exe" \
               "frpdesk-${VERSION}-linux-amd64.tar.gz" \
               "frpdesk-${VERSION}-linux-arm64.tar.gz" \
+              "frpdesk-cli-${VERSION}-linux-amd64.tar.gz" \
+              "frpdesk-cli-${VERSION}-linux-arm64.tar.gz" \
               "frpdesk-${VERSION}-licenses.zip" \
               "stable.json" | sort
           )"
@@ -255,7 +303,7 @@ jobs:
             exit 1
           fi
           gh release edit "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false
-          echo "[release] 已发布 v${VERSION}（8 个资产齐全，latest/download/stable.json 生效）"
+          echo "[release] 已发布 v${VERSION}（10 个资产齐全，latest/download/stable.json 生效）"
 
   # 可选镜像同步：独立作业，仅依赖 GitHub Release 发布成功；从已发布资产重新下载后
   # 原样同步（不重新构建），保证镜像与 GitHub 产物逐字节一致。放在独立作业是为了
@@ -342,4 +390,6 @@ jobs:
             --version "${VERSION}" \
             --manifest "mirror-staging/stable.json" \
             --artifacts-dir "mirror-staging" \
-            --extra-file "mirror-staging/frpdesk-${VERSION}-licenses.zip"
+            --extra-file "mirror-staging/frpdesk-${VERSION}-licenses.zip" \
+            --extra-file "mirror-staging/frpdesk-cli-${VERSION}-linux-amd64.tar.gz" \
+            --extra-file "mirror-staging/frpdesk-cli-${VERSION}-linux-arm64.tar.gz"

@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && !server
 
 // macOS AppKit 桥：仅用公开 API，补齐 wails v3 未暴露的运行时窗口/Dock 行为。
 // AppKit 要求主线程调用，非主线程时 dispatch_async 兜底（无需等待完成）。

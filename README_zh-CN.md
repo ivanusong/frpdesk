@@ -15,7 +15,8 @@ Frpdesk 是 [frp](https://github.com/fatedier/frp) 的桌面客户端，通过�
 - 服务状态、日志与 HTTP 请求统计
 - macOS 菜单栏后台常驻
 - 内置 HTTP 代理，支持 CORS 与 Host 改写
-- 中英文界面与应用内更新
+- 中英文界面与应用内更新（桌面版）
+- Linux 服务器无头网页管理：`frpdesk serve`
 
 ## 安装
 
@@ -29,10 +30,14 @@ Frpdesk 是 [frp](https://github.com/fatedier/frp) 的桌面客户端，通过�
 | Windows（ARM64） | `windows-arm64.exe` | 下载后直接运行 |
 | Linux（x64） | `linux-amd64.tar.gz` | 解压后运行 `./frpdesk` |
 | Linux（ARM64） | `linux-arm64.tar.gz` | 解压后运行 `./frpdesk` |
+| Linux 服务器无头版（x64） | `frpdesk-cli-<版本>-linux-amd64.tar.gz` | 解压后运行 `./frpdesk serve` |
+| Linux 服务器无头版（ARM64） | `frpdesk-cli-<版本>-linux-arm64.tar.gz` | 解压后运行 `./frpdesk serve` |
 
-完整文件名会在上述平台后缀前包含应用名称和版本号。安装后可在应用内检查更新。
+完整文件名会在上述平台后缀前包含应用名称和版本号。安装后可在桌面版应用内检查更新。
 
-Linux 包面向 Ubuntu 24.04 或兼容的桌面系统，需要 GTK 4 与 WebKitGTK 6.0；Ubuntu 可执行 `sudo apt install libgtk-4-1 libwebkitgtk-6.0-4` 安装。Windows 和 Linux 的许可文档可下载发布页中单独的 `licenses.zip` 附件。
+Linux 桌面包面向 Ubuntu 24.04 或兼容系统，需要 GTK 4 与 WebKitGTK 6.0；Ubuntu 可执行 `sudo apt install libgtk-4-1 libwebkitgtk-6.0-4` 安装。Windows 和 Linux 的许可文档可下载发布页中单独的 `licenses.zip` 附件。
+
+`frpdesk-cli-*` 是面向 Linux 服务器的独立无头构建：不依赖 GTK、WebKitGTK，也没有窗口、托盘和应用内更新。它通过 `frpdesk serve` 提供同一套网页界面（默认 `http://127.0.0.1:8080`）。网页管理界面没有鉴权，请保持在本机或可信网络，或使用 SSH 端口转发访问；桌面版与 `serve` 不要同时使用同一配置目录。参数、配置路径、退出方式与 systemd 示例见 [无头服务端（`frpdesk serve`）](docs/cli-server_zh-CN.md)。
 
 ## 服务端准备（FRPS）
 

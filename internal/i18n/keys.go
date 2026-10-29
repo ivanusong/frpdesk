@@ -91,6 +91,7 @@ var dict = map[string]entry{
 	"err.marshalConfig":        {"序列化配置失败", "Failed to serialize the config"},
 	"legacy.defaultServerName": {"默认服务器", "Default Server"},
 	"err.invalidLanguage":      {"语言偏好仅支持 system、zh-CN 或 en", "Language preference must be system, zh-CN, or en"},
+	"err.desktopOnly":          {"该功能仅在桌面版可用", "This feature is only available in the desktop app"},
 
 	// ---- 开机自启动（autostart） ----
 	"err.autostartExePath": {"无法确定当前程序路径", "Cannot determine the application path"},
@@ -136,6 +137,7 @@ var dict = map[string]entry{
 	"err.updaterShuttingDown": {"应用正在退出，更新操作已取消", "The app is quitting; the update was canceled"},
 	"upd.devDisabled":         {"开发版（版本号未注入），更新检查已禁用", "Development build (version not injected); update checks are disabled"},
 	"upd.noManifest":          {"未配置更新源，更新检查已禁用", "No update source configured; update checks are disabled"},
+	"upd.serverDisabled":      {"服务端模式不提供应用内更新，请替换二进制升级", "In-app updates are not available in server mode; replace the binary to upgrade"},
 	"upd.manifestInitFail":    {"更新源初始化失败：{0}", "Failed to initialize the update source: {0}"},
 	"upd.initFail":            {"更新器初始化失败：{0}", "Failed to initialize the updater: {0}"},
 	"upd.checkFail":           {"检查更新失败：{0}", "Failed to check for updates: {0}"},

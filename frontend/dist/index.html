@@ -5,8 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Frpdesk</title>
     <script>
-      // 首帧前标记平台：仅 macOS 隐藏标题栏需给红绿灯留位（96px），其余平台走系统标题栏
-      if (!/Macintosh|Mac OS/i.test(navigator.userAgent)) document.documentElement.dataset.noMac = "";
+      // 首帧前标记运行平台：
+      //   - frpdesk serve 注入 __FRPDESK_SERVER__（浏览器无原生标题栏，且隐藏桌面入口）；
+      //   - 桌面版仅 macOS 隐藏标题栏需给红绿灯留位（96px），其余平台走系统标题栏。
+      (function () {
+        if (window.__FRPDESK_SERVER__ === true) {
+          document.documentElement.dataset.runtimeMode = "server";
+          document.documentElement.dataset.noMac = "";
+          return;
+        }
+        if (!/Macintosh|Mac OS/i.test(navigator.userAgent)) document.documentElement.dataset.noMac = "";
+      })();
     </script>
     <link rel="stylesheet" href="./style.css" />
   </head>

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# test-build-targets.sh —— build.sh 六平台目标选择与打包的契约测试（mock 工具链，不真实编译）。
+# test-build-targets.sh —— build.sh 六平台桌面目标 + Linux CLI 双架构的契约测试
+# （mock 工具链，不真实编译）。
 #
 # 全部在临时 fixture 仓库中运行（只复制 build.sh、打包脚本、build 资源、许可文档与
 # workflow 副本；预置 frontend/dist/bindings marker），**绝不写入真实仓库**——真实仓库的
@@ -14,8 +15,11 @@
 #   5. 未知目标被拒绝；--print-version 兼容且不触发任何构建；
 #   6. 伪 Linux 主机缺省出本机架构 linux 包，CGO_ENABLED=1，且 tar.gz 顶层恰好单一
 #      可执行 frpdesk（updater extract.go 硬约束）并保留执行位；
-#   7. release.yml 契约：引用六平台产物名、8 个 draft 资产、stable.json 汇总校验；
-#   8. 隔离性：bindings rm/copy 只发生在 fixture（marker 被替换），真实仓库状态零变化。
+#   7. cli/linux 双架构在 darwin 主机交叉构建：CGO_ENABLED=0、server+production tag、
+#      产物名 frpdesk-cli-<版本>-linux-<arch>.tar.gz，包内顶层单一 frpdesk；
+#   8. release.yml 契约：引用六平台桌面产物与 CLI 双包、10 个 draft 资产、CLI 不进入
+#      updater stable.json、镜像同步包含 CLI 附件；
+#   9. 隔离性：bindings rm/copy 只发生在 fixture（marker 被替换），真实仓库状态零变化。
 # 用法：bash scripts/test-build-targets.sh
 # 退出码：0 全部通过；1 存在失败用例。
 
@@ -94,6 +98,7 @@ for a in "$@"; do
     prev="$a"
 done
 echo "go GOOS=${GOOS:-} GOARCH=${GOARCH:-} CGO_ENABLED=${CGO_ENABLED:-} out=${out}" >> "$MOCK_LOG"
+echo "go-args $*" >> "$MOCK_LOG"
 if [ -n "$out" ]; then
     mkdir -p "$(dirname "$out")"
     : > "$out"
@@ -236,6 +241,35 @@ echo "== 目标/host 约束 =="
 expect_fail "linux 目标在 darwin 主机被拒绝" "只能在 Linux 主机构建" linux/amd64
 expect_fail "未知目标被拒绝" "未知构建目标" bogus/target
 
+echo "== 服务端 CLI 交叉构建（darwin 主机 → linux 双架构）=="
+: > "$MOCK_LOG"
+bin_cli="$WORK/bin-cli"
+if run_build "$bin_cli" cli/linux/amd64 cli/linux/arm64; then
+    ok "CLI 双架构构建成功"
+else
+    fail "CLI 双架构构建失败（stderr=$(head -c 200 "$WORK/stderr.log")）"
+fi
+for arch in amd64 arm64; do
+    if grep -qF "go GOOS=linux GOARCH=${arch} CGO_ENABLED=0" "$MOCK_LOG"; then
+        ok "CLI ${arch}：GOOS=linux CGO_ENABLED=0"
+    else
+        fail "CLI ${arch}：GOOS=linux CGO_ENABLED=0"
+    fi
+    targz="$bin_cli/frpdesk-cli-9.9.9-linux-${arch}.tar.gz"
+    [ -f "$targz" ] && ok "CLI ${arch} 产物存在：$(basename "$targz")" || fail "CLI ${arch} 产物存在"
+    if [ -f "$targz" ] && [ "$(tar -tzf "$targz" 2>/dev/null)" = "frpdesk" ]; then
+        ok "CLI ${arch} tar.gz 顶层恰好单一 frpdesk"
+    else
+        fail "CLI ${arch} tar.gz 顶层恰好单一 frpdesk（实际：$(tar -tzf "$targz" 2>/dev/null | tr '\n' ' ')）"
+    fi
+done
+if [ "$(grep -c -- "-tags server production" "$MOCK_LOG")" -eq 2 ] &&
+    ! grep -q "wails3 syso" "$MOCK_LOG"; then
+    ok "CLI 使用 server+production tag 且不生成 windows syso"
+else
+    fail "CLI 使用 server+production tag 且不生成 windows syso（log=$(cat "$MOCK_LOG")）"
+fi
+
 echo "== --print-version 兼容 =="
 : > "$MOCK_LOG"
 v="$(cd "$FIXTURE" && PATH="$MOCKBIN:$PATH" FRPDESK_VERSION=9.9.9 bash "$FIXTURE/build.sh" --print-version)"
@@ -283,7 +317,7 @@ else
     fail "tar.gz 内 frpdesk 保留执行位"
 fi
 
-echo "== release.yml 六平台契约 =="
+echo "== release.yml 资产契约 =="
 contract=0
 for token in \
     "frpdesk-\${VERSION}-darwin-arm64.zip" \
@@ -292,6 +326,8 @@ for token in \
     "frpdesk-\${VERSION}-windows-arm64.exe" \
     "frpdesk-\${VERSION}-linux-amd64.tar.gz" \
     "frpdesk-\${VERSION}-linux-arm64.tar.gz" \
+    "frpdesk-cli-\${VERSION}-linux-amd64.tar.gz" \
+    "frpdesk-cli-\${VERSION}-linux-arm64.tar.gz" \
     "frpdesk-\${VERSION}-licenses.zip" \
     "stable.json"; do
     if grep -qF "$token" "$FIXTURE/.github/workflows/release.yml"; then
@@ -300,10 +336,31 @@ for token in \
         fail "release.yml 缺少资产契约：$token"
     fi
 done
-if [ "$contract" -eq 8 ]; then
-    ok "release.yml 资产契约齐全（6 平台包 + licenses.zip + stable.json）"
+if [ "$contract" -eq 10 ]; then
+    ok "release.yml 资产契约齐全（6 桌面包 + CLI 双包 + licenses.zip + stable.json）"
 fi
-for slug in linux/amd64 linux/arm64; do
+# CLI 制品只随 Release 分发，绝不进入桌面 updater 清单
+if sed -n '/wails3 updater manifest/,/wails3 updater verify/p' "$FIXTURE/.github/workflows/release.yml" | grep -q "frpdesk-cli"; then
+    fail "CLI 制品混入了桌面 updater stable.json 清单"
+else
+    ok "CLI 制品未进入桌面 updater stable.json"
+fi
+if grep -qF "核验 Linux CLI 归档" "$FIXTURE/.github/workflows/release.yml" &&
+    grep -qF "ARM aarch64" "$FIXTURE/.github/workflows/release.yml"; then
+    ok "release.yml 核验 CLI 归档（单一顶层/可执行位/目标架构）"
+else
+    fail "release.yml 缺少 CLI 归档核验步骤"
+fi
+# 镜像同步必须显式携带 CLI 附件（不在 stable.json 中，不会被镜像脚本自动发现）
+for arch in amd64 arm64; do
+    token="--extra-file \"mirror-staging/frpdesk-cli-\${VERSION}-linux-${arch}.tar.gz\""
+    if grep -qF -- "$token" "$FIXTURE/.github/workflows/release.yml"; then
+        ok "镜像同步包含 CLI 附件：linux-${arch}"
+    else
+        fail "镜像同步缺少 CLI 附件：linux-${arch}"
+    fi
+done
+for slug in linux/amd64 linux/arm64 cli/linux/amd64 cli/linux/arm64; do
     if grep -qF "$slug" "$FIXTURE/.github/workflows/build.yml" && grep -qF "$slug" "$FIXTURE/.github/workflows/release.yml"; then
         ok "workflow 覆盖目标 $slug"
     else

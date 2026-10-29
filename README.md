@@ -15,7 +15,8 @@ Frpdesk is a desktop client for [frp](https://github.com/fatedier/frp). Expose l
 - Service status, logs, and HTTP request statistics
 - Menu-bar background running on macOS
 - Built-in HTTP proxy with CORS and Host rewriting
-- Chinese and English interface, with in-app updates
+- Chinese and English interface, with in-app updates (desktop builds)
+- Headless web admin on Linux servers via `frpdesk serve`
 
 ## Install
 
@@ -29,10 +30,14 @@ Download the matching package from [GitHub Releases](https://github.com/ivanuson
 | Windows (ARM64) | `windows-arm64.exe` | Download and run |
 | Linux (x64) | `linux-amd64.tar.gz` | Extract and run `./frpdesk` |
 | Linux (ARM64) | `linux-arm64.tar.gz` | Extract and run `./frpdesk` |
+| Linux server, headless (x64) | `frpdesk-cli-<version>-linux-amd64.tar.gz` | Extract and run `./frpdesk serve` |
+| Linux server, headless (ARM64) | `frpdesk-cli-<version>-linux-arm64.tar.gz` | Extract and run `./frpdesk serve` |
 
-Package names include the app name and version before the platform suffix shown above. You can check for updates inside the app after installation.
+Package names include the app name and version before the platform suffix shown above. You can check for updates inside the desktop app after installation.
 
-Linux packages target Ubuntu 24.04 or compatible desktop systems and require GTK 4 and WebKitGTK 6.0. On Ubuntu, install them with `sudo apt install libgtk-4-1 libwebkitgtk-6.0-4`. License documents for Windows and Linux are available in the separate `licenses.zip` release asset.
+Linux desktop packages target Ubuntu 24.04 or compatible systems and require GTK 4 and WebKitGTK 6.0. On Ubuntu, install them with `sudo apt install libgtk-4-1 libwebkitgtk-6.0-4`. License documents for Windows and Linux are available in the separate `licenses.zip` release asset.
+
+The `frpdesk-cli-*` package is a separate headless build for Linux servers: no GTK, WebKitGTK, window, tray, or in-app updater. It serves the same web interface through `frpdesk serve` (default `http://127.0.0.1:8080`). The web UI has no authentication, so keep it on localhost or a trusted network, or use an SSH port forward. Do not run the desktop app and `serve` against the same config directory at the same time. See [Headless Server (`frpdesk serve`)](docs/cli-server.md) for options, configuration paths, shutdown, and a systemd example.
 
 ## Server Setup (FRPS)
 

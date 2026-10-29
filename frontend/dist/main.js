@@ -27,6 +27,9 @@ const state = {
   togglePending: new Set(), // 启用/停用 RPC 在途的服务 id 集合（期间开关禁点，防后到响应覆盖最后意图）
   dragSort: null, // 卡片拖拽排序进行中上下文（非 null 时事件推送不重建列表，拖拽结束后统一补绘）
   listRenderHoldUntil: 0, // 开关动画保护窗截止时间（拖拽另有 dragSort 状态，二者独立）
+  // desktop | server：先用 index.html 首帧标记（serve 注入），RuntimeInfo 绑定再确认；
+  // 服务端隐藏退出/登录自启/桌面更新入口。
+  runtime: { mode: document.documentElement.dataset.runtimeMode === "server" ? "server" : "desktop" },
 };
 
 // 状态展示文案 key（稳定语义 key，渲染时按当前语言取词；未知状态原样展示）
@@ -236,14 +239,23 @@ function setBusy(btn, busy, busyText) {
   btn.disabled = busy;
 }
 
-// copyTextToClipboard：写剪贴板。优先 wails 原生剪贴板（WKWebView 下 navigator.clipboard
-// 受 secure context 限制，与地址复制同因），降级 navigator.clipboard，再降级
-// 隐藏 textarea + execCommand。返回是否成功。
+// isServerMode：当前页面是否由 frpdesk serve 提供（无原生窗口/剪贴板/系统浏览器）。
+function isServerMode() {
+  return state.runtime.mode === "server";
+}
+
+// copyTextToClipboard：写剪贴板。桌面版优先 wails 原生剪贴板（WKWebView 下
+// navigator.clipboard 受 secure context 限制）；浏览器模式（serve）下 wails 剪贴板
+// 是服务端进程的空实现，必须直接走浏览器 API。逐级降级，返回是否成功。
 async function copyTextToClipboard(text) {
-  try {
-    await window.wails?.Clipboard?.SetText(text);
-    return true;
-  } catch {}
+  if (!isServerMode()) {
+    try {
+      if (typeof window.wails?.Clipboard?.SetText === "function") {
+        await window.wails.Clipboard.SetText(text);
+        return true;
+      }
+    } catch {}
+  }
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -807,6 +819,11 @@ function applyLaunchState(st) {
 async function refreshLaunchState() {
   const el = $("launch-at-login");
   if (!el || launchSync.busy) return;
+  // 服务端模式不接触系统登录启动项（入口也已隐藏）
+  if (isServerMode()) {
+    launchSync.supported = false;
+    return;
+  }
   const seq = ++launchSync.readSeq;
   el.disabled = true;
   try {
@@ -2329,6 +2346,7 @@ async function fetchInitUpdateInfo() {
 // available 事件晚于 RPC 返回」时无反馈）；seq 仅保护渲染：事件已先到则不覆盖渲染，
 // 但 toast 照常给出。app:update 事件只渲染不 toast，后台检查/失败不打扰。
 async function checkForUpdates() {
+  if (isServerMode()) return; // 服务端无应用内更新（入口已隐藏，双保险）
   if (state.updateChecking || state.updateApplying || state.update.info?.state === "checking" || UPDATE_BUSY_STATES.has(state.update.info?.state)) return;
   state.updateChecking = true;
   renderCheckButton();
@@ -2467,6 +2485,7 @@ function askUpdateConfirm({ title, meta, notes, confirmText }) {
 // 事件继续推送进度不锁前端）：updateApplying 持续到 RPC 返回，catch 可靠提示
 // 下载/重启失败（事件只渲染，不会重复 toast）。
 async function applyUpdateClick() {
+  if (isServerMode()) return; // 服务端无应用内更新（入口已隐藏，双保险）
   if (state.updateConfirming || state.updateApplying) return;
   const info = state.update.info;
   if (!info?.latestVersion || !["available", "ready", "error"].includes(info.state)) return;
@@ -2543,7 +2562,8 @@ function bindEvents() {
 
   // 退出程序：隧道运行/连接中（frpc 存活）才二次确认，未启动直接退出
   $("btn-quit").addEventListener("click", () => {
-    // 依据 activeCount（starting/running/stopping 实例数）判断：聚合 state 在部分失败等
+    if (isServerMode()) return; // 服务端退出由进程信号控制（按钮已隐藏）
+    // 依据 activeCount（starting/running/stopping 实例数）判断：聚合状态在部分失败等
     // partial 状态下会漏确认
     const activeCount = Number(state.snapshot?.status?.activeCount ?? 0);
     const quit = () => api.AppService.QuitApp().catch(() => {});
@@ -2669,6 +2689,10 @@ function bindEvents() {
   // 开机自启动开关：点选即时生效；失败恢复开关并可见提示（真实状态以后端为准）
   $("launch-at-login").addEventListener("change", async (e) => {
     const desired = e.target.checked;
+    if (isServerMode()) {
+      e.target.checked = false; // 服务端入口不可用：不发起系统操作
+      return;
+    }
     if (launchSync.busy) {
       e.target.checked = !desired; // 已有写入在途：回弹本次点击
       return;
@@ -2813,22 +2837,22 @@ function bindEvents() {
     toast("info", t("toast.logsCleared"));
   });
 
-  // TCP/UDP 地址点击复制（Wails 原生剪贴板；host:port 无协议不走浏览器）/ HTTP 链接系统浏览器打开
+  // TCP/UDP 地址点击复制（桌面走 Wails 原生剪贴板，浏览器走 Clipboard API）/
+  // HTTP 链接：桌面用系统浏览器打开，serve 网页用新标签页（服务端没有浏览器可开）。
   document.addEventListener("click", async (e) => {
     const addr = e.target.closest(".addr-copy[data-copy]");
     if (addr) {
-      // WKWebView 里 navigator.clipboard 受 secure context 限制，走 wails 原生剪贴板
-      try {
-        await window.wails.Clipboard.SetText(addr.dataset.copy);
-        toast("success", t("toast.copied"));
-      } catch {
-        toast("error", t("toast.copyFail"));
-      }
+      const ok = await copyTextToClipboard(addr.dataset.copy);
+      toast(ok ? "success" : "error", t(ok ? "toast.copied" : "toast.copyFail"));
       return;
     }
     const link = e.target.closest("a[data-url]");
     if (!link) return;
     e.preventDefault();
+    if (isServerMode()) {
+      window.open(link.dataset.url, "_blank", "noopener,noreferrer");
+      return;
+    }
     window.wails.Browser.OpenURL(link.dataset.url);
   });
 
@@ -2933,10 +2957,10 @@ function onServiceListClick(e) {
   if (btn.dataset.act === "edit") {
     openServiceModal(t("modal.editService", svcTypeLabel(svc.type)), svc);
   } else if (btn.dataset.act === "copy") {
-    // 走 wails 原生剪贴板（与 addr-copy 同因：WKWebView 下 navigator.clipboard 受限）
-    window.wails.Clipboard.SetText(btn.dataset.copy)
-      .then(() => toast("success", t("toast.copied")))
-      .catch(() => toast("error", t("toast.copyFail")));
+    // 与地址复制同一套降级（桌面 Wails 原生，serve 浏览器 Clipboard API）
+    copyTextToClipboard(btn.dataset.copy).then((ok) =>
+      toast(ok ? "success" : "error", t(ok ? "toast.copied" : "toast.copyFail")),
+    );
   } else if (btn.dataset.act === "qr") {
     openQrModal(btn.dataset.url);
   } else if (btn.dataset.act === "delete") {
@@ -3230,9 +3254,27 @@ async function retryBootSnapshot() {
   if (btn) btn.disabled = false;
 }
 
+// initRuntimeMode：读取后端运行模式（desktop/server）作为 UI 能力开关权威。
+// 失败时保留 index.html 首帧标记（serve 页面已标记 server），不阻塞启动。
+async function initRuntimeMode() {
+  try {
+    const info = await api.AppService.RuntimeInfo();
+    const mode = info?.mode === "server" ? "server" : "desktop";
+    state.runtime.mode = mode;
+    document.documentElement.dataset.runtimeMode = mode;
+    // 服务端不拉取更新信息；版本号直接来自运行模式绑定，避免顶栏版本留空
+    if (info?.version) $("app-version").textContent = `Frpdesk ${info.version}`;
+  } catch (err) {
+    try {
+      await api.AppService.FrontendLog("error", `RuntimeInfo failed: ${enDetail(err)}`);
+    } catch {}
+  }
+}
+
 async function boot() {
   initLanguage(); // 语言必须在主题/事件绑定前应用：静态文案/按钮 tip 随偏好
   initTheme();
+  await initRuntimeMode(); // 服务端页面在绑定事件前确定能力开关（隐藏桌面专属入口）
   bindEvents();
   try {
     await api.AppService.FrontendLog("info", `boot start t=${Date.now()}`);
@@ -3269,8 +3311,9 @@ async function boot() {
     }
   }
   scrollLogToEnd(true);
-  // 更新信息：事件先到则丢弃迟到响应；失败不阻塞首屏（后端日志可查）
-  fetchInitUpdateInfo().catch(() => {});
+  // 更新信息：事件先到则丢弃迟到响应；失败不阻塞首屏（后端日志可查）。
+  // 服务端模式无应用内更新，连读取都不发起（UI 入口已隐藏）。
+  if (!isServerMode()) fetchInitUpdateInfo().catch(() => {});
   try {
     await api.AppService.FrontendLog("info", `boot done logs=${state.logs.length} snapshot=${state.snapshot ? "ok" : "null"}`);
   } catch {}
@@ -3332,6 +3375,9 @@ export const __test = {
   applyLaunchState,
   refreshLaunchState,
   launchSync,
+  // 运行模式：服务端通过 RuntimeInfo/首帧标记切换能力开关（隐藏桌面专属入口）
+  initRuntimeMode,
+  isServerMode,
   // 诊断通道英文详情过滤（本地化错误不回流日志通道）
   enDetail,
   // 背景圈定嵌套恢复与字段错误清理（供验证脚本直接驱动真实代码路径）

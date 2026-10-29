@@ -1,7 +1,9 @@
-# 构建工作流：只读构建六个用户平台包（darwin/windows/linux × amd64/arm64）并上传附件。
-# macOS Runner 一台出 darwin 双架构 + windows 双架构（windows 为纯 Go 交叉，逐架构 syso）；
-# Linux 由 ubuntu-24.04 / ubuntu-24.04-arm 原生构建（Wails Linux 走 CGO + GTK4/webkitgtk-6.0，
-# 不做 Mac 伪交叉）。前端零 npm，行为验证使用 Runner 自带 Node 运行零依赖脚本。
+# 构建工作流：只读构建六个桌面平台包（darwin/windows/linux × amd64/arm64）与两个
+# 无头服务端 CLI 包（Linux amd64/arm64，server tag + CGO_ENABLED=0）并上传附件。
+# macOS Runner 一台出 darwin 双架构 + windows 双架构 + Linux CLI 双架构（均为纯 Go 交叉，
+# windows 逐架构 syso）；Linux 桌面由 ubuntu-24.04 / ubuntu-24.04-arm 原生构建
+# （Wails Linux 走 CGO + GTK4/webkitgtk-6.0，不做 Mac 伪交叉）。前端零 npm，
+# 行为验证使用 Runner 自带 Node 运行零依赖脚本。
 # 构建版本由 build.sh 解析（FRPDESK_VERSION > git describe > dev），不读取版本文件。
 name: Build
 
@@ -27,10 +29,11 @@ jobs:
         include:
           - os: macos-latest
             slug: mac
-            targets: darwin/arm64 darwin/amd64 windows/amd64 windows/arm64
+            targets: darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 cli/linux/amd64 cli/linux/arm64
             artifact_paths: |
               bin/frpdesk-*-darwin-*.zip
               bin/frpdesk-*-windows-*.exe
+              bin/frpdesk-cli-*-linux-*.tar.gz
               bin/frpdesk-*-licenses.zip
           - os: ubuntu-24.04
             slug: linux-amd64
@@ -77,6 +80,16 @@ jobs:
       - name: 单元测试
         if: runner.os == 'macOS'
         run: go test ./...
+
+      - name: 服务端 CLI 单元测试（server + production 构建标签）
+        if: runner.os == 'macOS'
+        run: go test -tags 'server production' ./...
+
+      - name: 服务端 CLI IPv6 生命周期测试（Wails 单进程限制，单独运行）
+        if: runner.os == 'macOS'
+        env:
+          FRPDESK_TEST_SERVE_HOST: '::1'
+        run: go test -tags 'server production' -run TestServerLifecycle -count=1 .
 
       - name: 前端多服务端行为验证（零依赖 Node 脚本）
         if: runner.os == 'macOS'

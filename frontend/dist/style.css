@@ -2642,3 +2642,13 @@ button.service-icon:focus-visible {
     transition: none;
   }
 }
+
+/* ===== 服务端模式（frpdesk serve 网页管理）===== */
+/* 浏览器中不提供退出/登录自启/桌面更新：退出由 SIGINT/SIGTERM 控制，
+   更新通过替换服务端二进制完成（见 docs/cli-server*.md）。 */
+html[data-runtime-mode="server"] #btn-quit,
+html[data-runtime-mode="server"] #btn-check-update,
+html[data-runtime-mode="server"] #btn-update-apply,
+html[data-runtime-mode="server"] .settings-group--launch {
+  display: none !important;
+}

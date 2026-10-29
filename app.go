@@ -18,18 +18,29 @@ import (
 	"frpdesk/internal/tunnel"
 )
 
+// appMode 区分桌面与无头服务端运行模式。
+// 服务端复用同一 AppService/前端，但绝不装配托盘/窗口/自动更新，
+// 并对桌面专属操作做运行时 guard（见 QuitApp/LaunchAtLogin/更新方法）。
+type appMode string
+
+const (
+	appModeDesktop appMode = "desktop"
+	appModeServer  appMode = "server"
+)
+
 // AppService 暴露给前端的服务：服务器/隧道 CRUD + 多实例启停 + 状态/日志事件推送。
 // 方法名会被 wails3 generate bindings 生成为前端 JS API。
 type AppService struct {
+	mode     appMode
 	store    *configstore.Store
 	tunnel   *tunnel.Manager
 	stats    *stats.Collector // HTTP 请求级流量统计（App 级内存态，随进程重启归零）
 	wailsApp *application.App
-	tray     *trayController    // 托盘/窗口控制；attachUI 后可用
-	up       *updaterController // 应用内更新（updater.go）；attachUI 装配框架 Updater
+	tray     *trayController    // 托盘/窗口控制；仅桌面模式 attachUI 后可用
+	up       *updaterController // 应用内更新（updater.go）；仅桌面模式装配框架 Updater
 }
 
-// NewAppService 创建服务实例（应用启动时调用，失败直接退出）。
+// NewAppService 创建桌面应用服务实例（应用启动时调用，配置初始化失败直接退出）。
 func NewAppService() *AppService {
 	store, err := configstore.New()
 	if err != nil {
@@ -37,6 +48,11 @@ func NewAppService() *AppService {
 		slog.Error("failed to initialize the config store", "err", i18n.ErrText(err))
 		panic(err)
 	}
+	return newAppService(store, appModeDesktop)
+}
+
+// newAppService 使用已加载的配置存储创建服务（桌面入口与服务端 CLI 共用）。
+func newAppService(store *configstore.Store, mode appMode) *AppService {
 	// 按持久化偏好解析界面语言（system 时探测系统语言）：必须在托盘/窗口
 	// 装配前完成，保证启动时的托盘菜单与状态就是用户语言。
 	i18n.SetPreference(store.Language())
@@ -45,7 +61,7 @@ func NewAppService() *AppService {
 
 	// 请求统计：collector 与 App 同生命周期（不随隧道启停清零，重启归零）；
 	// tunnel 代理层回调桥接到收集器，serverID/serviceID 按请求发生时捕获
-	svc := &AppService{store: store, tunnel: mgr, stats: stats.NewCollector()}
+	svc := &AppService{mode: mode, store: store, tunnel: mgr, stats: stats.NewCollector()}
 	svc.syncStatsMappings()
 	mgr.RequestReporter = func(serverID, serverName, serviceID, method, path, ua string, status int, durationMs int64, bytesIn, bytesOut int64) {
 		svc.stats.Record(stats.RecordInput{
@@ -115,9 +131,13 @@ var (
 // wailsApp 已由 attachUI 在 Run 前赋值，此处不再重复写入。
 func (a *AppService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
 	// 应用启动即对全部配置服务器做一次对齐：有 enabled 隧道的自动连接，
-	// 无隧道的不空连（服务器完全由 Service.Enabled 驱动，无手动启停入口）
+	// 无隧道的不空连（服务器完全由 Service.Enabled 驱动，无手动启停入口）。
+	// 服务端模式同样执行：frpdesk serve 启动后即恢复全部 enabled 隧道。
 	a.reconcileAll()
-	// 启动更新检查（异步不阻塞；dev 版内部自动禁用；仅 Check，绝不自动安装）
+	if a.mode == appModeServer {
+		return nil
+	}
+	// 桌面专属：启动更新检查（异步不阻塞；dev 版内部自动禁用；仅 Check，绝不自动安装）
 	go a.up.startupCheck()
 	// Windows：异步清理更新替换残留（<exe>.old.<数字>，内部延迟 5s 首扫 + 有界重试）
 	a.startUpdateCleanup()
@@ -139,6 +159,11 @@ func (a *AppService) ServiceShutdown() error {
 
 // attachUI 在应用对象创建后、Run 之前装配托盘、窗口钩子与更新器（框架就绪期安全初始化）。
 func (a *AppService) attachUI(app *application.App, window *application.WebviewWindow) {
+	if a.mode == appModeServer {
+		// 防御性 guard：服务端构建绝不应装配窗口/托盘/更新器
+		slog.Warn("[ui] attachUI ignored in server mode")
+		return
+	}
 	a.wailsApp = app
 	a.tray = newTrayController(app, window, a)
 
@@ -175,20 +200,50 @@ func (a *AppService) logUpdate(level, format string, args ...any) {
 	a.tunnel.AppendLog(level, msg)
 }
 
+// RuntimeInfo 返回当前运行模式与版本（前端据此隐藏桌面专属入口）。
+// mode: desktop（原生窗口/托盘/应用内更新）或 server（浏览器管理的无头服务）。
+type RuntimeInfo struct {
+	Mode    string `json:"mode"`
+	Version string `json:"version"`
+}
+
+// RuntimeInfo 返回运行模式与版本（前端启动时读取一次，作为 UI 能力开关的权威来源）。
+func (a *AppService) RuntimeInfo() RuntimeInfo {
+	return RuntimeInfo{Mode: string(a.mode), Version: currentVersion}
+}
+
+// serverUpdateInfo 服务端模式的更新状态：明确禁用，绝不装配框架 Updater。
+func serverUpdateInfo() UpdateInfo {
+	return UpdateInfo{
+		CurrentVersion: currentVersion,
+		State:          updDisabled,
+		Message:        i18n.T("upd.serverDisabled"),
+	}
+}
+
 // UpdateInfo 返回当前更新状态（前端绑定拉取；与 app:update 事件同构）。
 func (a *AppService) UpdateInfo() UpdateInfo {
+	if a.mode == appModeServer {
+		return serverUpdateInfo()
+	}
 	return a.up.snapshot()
 }
 
 // CheckForUpdates 手动检查更新（与启动/定时检查互斥，忙时返回明确错误）。
 // 来源标签进入日志通道，约定固定英文（不随界面语言翻译）。
 func (a *AppService) CheckForUpdates() (UpdateInfo, error) {
+	if a.mode == appModeServer {
+		return serverUpdateInfo(), a.fail("check for updates", i18n.LErr("err.desktopOnly"))
+	}
 	info, err := a.up.check("manual check")
 	return info, a.fail("check for updates", err)
 }
 
 // InstallUpdate 用户确认后的下载安装重启（无已检查新版时返回明确错误）。
 func (a *AppService) InstallUpdate() error {
+	if a.mode == appModeServer {
+		return a.fail("install update", i18n.LErr("err.desktopOnly"))
+	}
 	return a.fail("install update", a.up.install())
 }
 
@@ -275,6 +330,10 @@ func isDevBuild() bool {
 // LaunchAtLogin 返回开机自启动的真实系统注册状态。开发版不触碰系统：把临时
 // 二进制注册成登录启动项只会留下死链，直接返回 Supported=false（前端禁用开关）。
 func (a *AppService) LaunchAtLogin() (LaunchAtLoginState, error) {
+	// 服务端不注册登录自启动（无桌面会话；避免意外写入系统启动项）
+	if a.mode == appModeServer {
+		return LaunchAtLoginState{Supported: false, Enabled: false}, nil
+	}
 	if isDevBuild() {
 		return LaunchAtLoginState{Supported: false, Enabled: false}, nil
 	}
@@ -288,6 +347,10 @@ func (a *AppService) LaunchAtLogin() (LaunchAtLoginState, error) {
 // SetLaunchAtLogin 注册/注销开机自启动（幂等）。系统操作失败原样返回错误
 // （前端恢复开关并可见提示），绝不只写配置假装成功；成功返回注册后的真实状态。
 func (a *AppService) SetLaunchAtLogin(enabled bool) (LaunchAtLoginState, error) {
+	// 服务端为系统服务（systemd 等）管理生命周期，绝不接触桌面登录启动项
+	if a.mode == appModeServer {
+		return LaunchAtLoginState{Supported: false, Enabled: false}, a.fail("set launch at login", i18n.LErr("err.desktopOnly"))
+	}
 	if isDevBuild() {
 		return LaunchAtLoginState{Supported: false, Enabled: false}, a.fail("set launch at login", i18n.LErr("err.autostartDev"))
 	}
@@ -578,6 +641,12 @@ func (a *AppService) ReorderServices(ids []string) (configstore.Snapshot, error)
 // QuitApp 前端「退出程序」入口（二次确认后调用）：复用托盘退出路径——
 // 置 quitting 后 app.Quit，ServiceShutdown 负责停止全部隧道等清理。
 func (a *AppService) QuitApp() {
+	// 服务端退出由进程信号（Ctrl+C / systemctl stop）控制：
+	// WebUI 的退出按钮不应能杀死共享服务，guard 为 no-op。
+	if a.mode == appModeServer {
+		slog.Warn("[ui] quit ignored in server mode; stop the process with SIGINT/SIGTERM")
+		return
+	}
 	slog.Info("[ui] quit requested")
 	if a.tray != nil {
 		a.tray.quit()

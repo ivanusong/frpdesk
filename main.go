@@ -1,7 +1,8 @@
+//go:build !server
+
 package main
 
 import (
-	"embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,9 +11,6 @@ import (
 
 	"frpdesk/internal/i18n"
 )
-
-//go:embed all:frontend/dist
-var assets embed.FS
 
 func main() {
 	// --version：打印版本后立即退出，必须发生在 NewAppService 之前，

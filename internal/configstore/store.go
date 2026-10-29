@@ -314,6 +314,9 @@ const (
 	configDirName       = "frpdesk"
 	legacyConfigDirName = "frpcc"
 	configFileName      = "config.json"
+	// 配置包含明文 frp token：目录与文件均只允许当前用户访问。
+	configDirPerm  os.FileMode = 0o700
+	configFilePerm os.FileMode = 0o600
 )
 
 // userConfigPath 返回新配置文件路径：os.UserConfigDir()/frpdesk/config.json。
@@ -328,6 +331,26 @@ func appConfigPath(dirName string) (string, error) {
 		return "", i18n.LErrWrap("err.userConfigDir", err)
 	}
 	return filepath.Join(dir, dirName, configFileName), nil
+}
+
+// DefaultConfigPath 返回默认配置文件路径（os.UserConfigDir()/frpdesk/config.json）。
+// 供服务端 CLI 打印与测试使用，路径规则与 New 完全一致。
+func DefaultConfigPath() (string, error) {
+	return userConfigPath()
+}
+
+// ConfigPathInDir 返回指定配置目录下的 config.json 绝对路径。
+// dir 可为相对路径；目录本身不要求已存在（首次保存时创建）。
+func ConfigPathInDir(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "", i18n.LErr("err.configDir")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", i18n.LErrWrap("err.configDir", err)
+	}
+	return filepath.Join(abs, configFileName), nil
 }
 
 // New 创建存储并加载配置（含旧版单全局配置的幂等迁移）。
@@ -367,12 +390,12 @@ func copyLegacyConfigIfNeeded(newPath, legacyPath string) (bool, error) {
 	if err != nil {
 		return false, i18n.LErrWrap("err.readLegacy", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(newPath), configDirPerm); err != nil {
 		return false, i18n.LErrWrap("err.configDir", err)
 	}
 
 	// O_EXCL：并发/重复启动时绝不覆盖已生成的新配置
-	f, err := os.OpenFile(newPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := os.OpenFile(newPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, configFilePerm)
 	if err != nil {
 		if os.IsExist(err) {
 			return false, nil // 竞争下已有新配置：按「新配置优先」继续
@@ -550,14 +573,19 @@ func normalizeScheme(scheme string) string {
 }
 
 func (s *Store) save() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, configDirPerm); err != nil {
+		return i18n.LErrWrap("err.configDir", err)
+	}
+	// MkdirAll 不会收紧已存在目录的权限；配置包含明文 token，保存前幂等纠正。
+	if err := os.Chmod(dir, configDirPerm); err != nil {
 		return i18n.LErrWrap("err.configDir", err)
 	}
 	raw, err := json.MarshalIndent(s.cfg, "", "  ")
 	if err != nil {
 		return i18n.LErrWrap("err.marshalConfig", err)
 	}
-	return os.WriteFile(s.path, append(raw, '\n'), 0o644)
+	return os.WriteFile(s.path, append(raw, '\n'), configFilePerm)
 }
 
 // Config 返回配置副本。
