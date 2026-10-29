@@ -12,7 +12,7 @@ vhostHTTPPort = {{ .Envs.FRPS_BIND_PORT }}
 auth.method = "token"
 auth.token = "{{ .Envs.FRPS_TOKEN }}"
 
-# Subdomains served over HTTP: <subdomain>.<FRPS_DOMAIN>
+# Subdomains served over plain HTTP: <subdomain>.<FRPS_DOMAIN>
 subDomainHost = "{{ .Envs.FRPS_DOMAIN }}"
 
 # Frpdesk always connects over TLS, so reject plaintext control connections.

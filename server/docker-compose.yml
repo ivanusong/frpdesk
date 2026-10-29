@@ -1,6 +1,8 @@
-# Frpdesk server: frps plus Traefik for automatic HTTPS.
-# Usage: copy .env.example to .env, fill it in, then `docker compose up -d`.
-# No other file needs editing.
+# Frpdesk server: a single frps container.
+# Usage: copy .env.example to .env, fill it in, then `docker compose up -d`;
+# no other file needs editing.
+# Plain HTTP only: frps cannot terminate TLS for HTTP tunnels, so for https://
+# put your own reverse proxy in front of FRPS_BIND_PORT.
 
 services:
   frps:
@@ -19,49 +21,3 @@ services:
       # Ports available to TCP/UDP services.
       - "${FRPS_REMOTE_PORTS:-20000-20099}:${FRPS_REMOTE_PORTS:-20000-20099}"
       - "${FRPS_REMOTE_PORTS:-20000-20099}:${FRPS_REMOTE_PORTS:-20000-20099}/udp"
-    labels:
-      - traefik.enable=true
-      # Any subdomain of FRPS_DOMAIN, served over HTTPS with an auto-issued
-      # wildcard certificate. Wildcard Host matching needs Traefik 3.7+ (v3
-      # rule syntax); this template pins traefik:v3.7.
-      - traefik.http.routers.frpdesk.rule=Host(`*.${FRPS_DOMAIN:?set FRPS_DOMAIN in .env}`)
-      - traefik.http.routers.frpdesk.entrypoints=websecure
-      - traefik.http.routers.frpdesk.service=frpdesk
-      - traefik.http.routers.frpdesk.tls=true
-      - traefik.http.routers.frpdesk.tls.certresolver=letsencrypt
-      - traefik.http.routers.frpdesk.tls.domains[0].main=${FRPS_DOMAIN}
-      - traefik.http.routers.frpdesk.tls.domains[0].sans=*.${FRPS_DOMAIN}
-      # Forward to frps with the original Host header, which frps routes on.
-      - traefik.http.services.frpdesk.loadbalancer.server.port=${FRPS_BIND_PORT:-7000}
-      - traefik.http.services.frpdesk.loadbalancer.passhostheader=true
-  traefik:
-    image: traefik:v3.7
-    restart: unless-stopped
-    env_file: .env
-    command:
-      # Static configuration is passed as flags so every value can come from .env.
-      # certificatesResolvers belongs here, not in a dynamic config file.
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      - --entrypoints.websecure.address=:443
-      # No read/write cap, so streaming responses and long uploads survive.
-      - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=0s
-      - --entrypoints.websecure.transport.respondingtimeouts.writetimeout=0s
-      - --entrypoints.websecure.transport.respondingtimeouts.idletimeout=300s
-      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?set ACME_EMAIL in .env}
-      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=${DNS_PROVIDER:?set DNS_PROVIDER in .env}
-      - --certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=${ACME_DELAY_BEFORE_CHECK:-30}
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      # Traefik reads container labels to build its routes.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./letsencrypt:/letsencrypt
-    depends_on:
-      frps:
-        condition: service_started

@@ -43,7 +43,7 @@ The `frpdesk-cli-*` package is a separate headless build for Linux servers: no G
 
 Frpdesk is a client only; you still need a running [frps](https://github.com/fatedier/frp) server. Frpdesk embeds frp v0.71.0 as its client, so the server should be that version or newer.
 
-If you have your own server and domain, deploy the ready-made Docker Compose stack in [`server/`](server): it runs frps behind Traefik, which issues and renews a wildcard TLS certificate automatically. You edit a single `.env` file and run `docker compose up -d`. Step-by-step instructions are in [Server Deployment with Docker Compose](docs/server.md). For AI-assisted setup, ask your coding agent: "Read [skills/frps-setup/SKILL.md](skills/frps-setup/SKILL.md) and help me deploy the Frpdesk server."
+If you have your own server and domain, deploy the ready-made Docker Compose stack in [`server/`](server): a single-container frps stack where you edit a single `.env` file and run `docker compose up -d`. It serves plain HTTP only; for `https://`, terminate TLS with your own reverse proxy in front of it (see the deployment guide). Step-by-step instructions are in [Server Deployment with Docker Compose](docs/server.md). For AI-assisted setup, ask your coding agent: "Read [skills/frps-setup/SKILL.md](skills/frps-setup/SKILL.md) and help me deploy the Frpdesk server."
 
 If someone else gave you the frps address, skip this section and go straight to the Quick Start below.
 
@@ -62,7 +62,7 @@ vhostHTTPPort = 7000                  # same as bindPort
 subDomainHost = "example.com"         # Base domain in Frpdesk (no "*." prefix)
 ```
 
-Open `bindPort` in the firewall, plus the remote port of each TCP/UDP service, and point a wildcard DNS record `*.example.com` at the server IP. This setup serves `http://` only; for `https://` use the Compose stack above, since frps cannot terminate TLS for HTTP tunnels itself.
+Open `bindPort` in the firewall, plus the remote port of each TCP/UDP service, and point a wildcard DNS record `*.example.com` at the server IP. This setup serves `http://` only; frps cannot terminate TLS for HTTP tunnels itself, so for `https://` put your own reverse proxy in front of the HTTP entry. See [Server Deployment with Docker Compose](docs/server.md).
 
 ## Quick Start
 
