@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"frpdesk/internal/configstore"
+	"frpdesk/internal/i18n"
 )
 
 func TestParseServeOptionsDefaults(t *testing.T) {
@@ -212,6 +213,9 @@ func TestInjectServerMode(t *testing.T) {
 }
 
 func TestServerModeGuards(t *testing.T) {
+	prevLang := i18n.Current()
+	t.Cleanup(func() { i18n.Set(prevLang) })
+
 	store := configstore.NewAtPath(filepath.Join(t.TempDir(), "config.json"))
 	svc := newAppService(store, appModeServer)
 
@@ -252,6 +256,8 @@ func TestServerLifecycle(t *testing.T) {
 	if testing.Short() {
 		t.Skip("跳过真实 HTTP 服务端生命周期测试")
 	}
+	prevLang := i18n.Current()
+	t.Cleanup(func() { i18n.Set(prevLang) })
 
 	// Wails 一个进程只维护一个全局 App：同一测试二进制不能先后启动两个真实服务。
 	// 通过 FRPDESK_TEST_SERVE_HOST 分别验证 IPv4 与 IPv6 监听。

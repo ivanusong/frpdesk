@@ -173,6 +173,9 @@ func TestLaunchAtLoginRPCDevGate(t *testing.T) {
 	if !isDevBuild() {
 		t.Fatalf("测试环境版本号应为 dev（未注入），得到 %q", currentVersion)
 	}
+	prevLang := i18n.Current()
+	t.Cleanup(func() { i18n.Set(prevLang) })
+	i18n.Set(i18n.ZH)
 	svc := newTestAppService(t)
 
 	st, err := svc.LaunchAtLogin()

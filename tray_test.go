@@ -12,6 +12,10 @@ import (
 )
 
 func TestTrayViewFor(t *testing.T) {
+	prevLang := i18n.Current()
+	t.Cleanup(func() { i18n.Set(prevLang) })
+	i18n.Set(i18n.ZH)
+
 	cases := []struct {
 		name             string
 		status           configstore.TunnelStatus
@@ -170,6 +174,10 @@ func TestTrayViewForLocalized(t *testing.T) {
 // TestTrayRunningSingleDigit 托盘 running 行使用隧道粒度单数字的端到端映射
 // （trayViewFor 与 connectedTunnelCount 的组合口径）。
 func TestTrayRunningSingleDigit(t *testing.T) {
+	prevLang := i18n.Current()
+	t.Cleanup(func() { i18n.Set(prevLang) })
+	i18n.Set(i18n.ZH)
+
 	cfg := configstore.Config{
 		Servers: []configstore.ServerConfig{{ID: "a", Name: "甲"}, {ID: "b", Name: "乙"}},
 		Services: []configstore.Service{
